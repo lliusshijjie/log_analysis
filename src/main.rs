@@ -229,7 +229,7 @@ fn build_histogram(entries: &[LogEntry]) -> Vec<(String, u64)> {
     let mut counts: HashMap<String, u64> = HashMap::new();
     for entry in entries {
         if let Some(ts) = parse_timestamp(&entry.timestamp) {
-            let key = ts.format("%H:%M").to_string();
+            let key = ts.format("%m-%d %H:%M").to_string();
             *counts.entry(key).or_insert(0) += 1;
         }
     }
@@ -467,19 +467,40 @@ fn ui(frame: &mut Frame, app: &mut App) {
     frame.render_widget(detail_widget, chunks[2]);
 
     // Histogram
-    let max_bars = (chunks[3].width as usize).saturating_sub(4) / 5;
+    let hist_area = chunks[3];
+    let max_bars = (hist_area.width as usize).saturating_sub(10) / 10;
     let hist_data: Vec<_> = app.histogram.iter().rev().take(max_bars).rev()
-        .map(|(label, val)| Bar::default().value(*val).label(Line::from(label.clone()))).collect();
+        .map(|(label, val)| {
+            let color = if *val > 100 { Color::Red } else if *val > 50 { Color::Yellow } else { Color::Cyan };
+            Bar::default().value(*val).label(Line::from(label.clone())).style(Style::default().fg(color))
+        }).collect();
+
     let max_val = app.histogram.iter().map(|(_, v)| *v).max().unwrap_or(1);
+    
+    let total: u64 = app.histogram.iter().map(|(_, v)| *v).sum();
+    let peak = app.histogram.iter().max_by_key(|(_, v)| *v).map(|(t, v)| format!("Peak: {} @ {}", v, t)).unwrap_or_default();
+    
     let chart = BarChart::default()
-        .block(Block::default().borders(Borders::ALL).title(" Timeline (logs/min) "))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(vec![
+                Span::styled(" 时间轴 ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(format!("(月-日 时:分, 总计:{}, {}) ", total, peak), Style::default().fg(Color::DarkGray)),
+            ]))
+            .title_bottom(Line::from(vec![
+                Span::styled(" █", Style::default().fg(Color::Red)),
+                Span::styled(">100 ", Style::default().fg(Color::DarkGray)),
+                Span::styled("█", Style::default().fg(Color::Yellow)),
+                Span::styled(">50 ", Style::default().fg(Color::DarkGray)),
+                Span::styled("█", Style::default().fg(Color::Cyan)),
+                Span::styled("正常 ", Style::default().fg(Color::DarkGray)),
+            ]).right_aligned()))
         .data(BarGroup::default().bars(&hist_data))
-        .bar_width(3)
-        .bar_gap(1)
-        .bar_style(Style::default().fg(Color::Cyan))
-        .value_style(Style::default().fg(Color::White))
+        .bar_width(12)
+        .bar_gap(3)
+        .value_style(Style::default().fg(Color::White).bg(Color::Black))
         .max(max_val);
-    frame.render_widget(chart, chunks[3]);
+    frame.render_widget(chart, hist_area);
 }
 
 fn main() -> Result<()> {
