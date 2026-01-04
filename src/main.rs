@@ -15,12 +15,15 @@ use encoding_rs::GB18030;
 use memmap2::Mmap;
 use ratatui::{
     prelude::*,
-    widgets::{Bar, BarChart, BarGroup, Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Bar, BarChart, BarGroup, Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use regex::Regex;
 use regex::bytes::Regex as BytesRegex;
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::mpsc;
+
+mod ai_client;
 
 #[derive(Debug, Serialize, Clone)]
 struct LogEntry {
@@ -54,6 +57,21 @@ impl DisplayEntry {
     fn get_delta_ms(&self) -> Option<i64> {
         match self { DisplayEntry::Normal(log) => log.delta_ms, _ => None }
     }
+    fn get_content(&self) -> String {
+        match self {
+            DisplayEntry::Normal(log) => format!("{} [{}][{}]: {}", log.timestamp, log.tid, log.level, log.content),
+            DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
+        }
+    }
+}
+
+#[derive(Default)]
+enum AiState {
+    #[default]
+    Idle,
+    Loading,
+    Completed(String),
+    Error(String),
 }
 
 struct App {
@@ -69,10 +87,13 @@ struct App {
     status_msg: Option<(String, Instant)>,
     clipboard: Option<Clipboard>,
     histogram: Vec<(String, u64)>,
+    ai_state: AiState,
+    ai_tx: mpsc::Sender<String>,
+    ai_rx: mpsc::Receiver<Result<String, String>>,
 }
 
 impl App {
-    fn new(entries: Vec<DisplayEntry>, histogram: Vec<(String, u64)>) -> Self {
+    fn new(entries: Vec<DisplayEntry>, histogram: Vec<(String, u64)>, ai_tx: mpsc::Sender<String>, ai_rx: mpsc::Receiver<Result<String, String>>) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() { list_state.select(Some(0)); }
         Self {
@@ -88,6 +109,8 @@ impl App {
             status_msg: None,
             clipboard: Clipboard::new().ok(),
             histogram,
+            ai_state: AiState::Idle,
+            ai_tx, ai_rx,
         }
     }
 
@@ -501,6 +524,47 @@ fn ui(frame: &mut Frame, app: &mut App) {
         .value_style(Style::default().fg(Color::White).bg(Color::Black))
         .max(max_val);
     frame.render_widget(chart, hist_area);
+
+    // AI Popup
+    match &app.ai_state {
+        AiState::Loading => {
+            let area = centered_rect(40, 5, frame.area());
+            frame.render_widget(Clear, area);
+            let popup = Paragraph::new("⏳ AI 分析中...")
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL).title(" AI 诊断 "));
+            frame.render_widget(popup, area);
+        }
+        AiState::Completed(text) | AiState::Error(text) => {
+            let is_error = matches!(app.ai_state, AiState::Error(_));
+            let area = centered_rect(80, 60, frame.area());
+            frame.render_widget(Clear, area);
+            let title = if is_error { " ❌ AI 错误 (Esc关闭) " } else { " ✅ AI 诊断结果 (Esc关闭) " };
+            let style = if is_error { Style::default().fg(Color::Red) } else { Style::default().fg(Color::Green) };
+            let popup = Paragraph::new(text.clone())
+                .wrap(Wrap { trim: false })
+                .block(Block::default().borders(Borders::ALL).title(title).title_style(style));
+            frame.render_widget(popup, area);
+        }
+        AiState::Idle => {}
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ]).split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ]).split(popup_layout[1])[1]
 }
 
 fn main() -> Result<()> {
@@ -514,17 +578,43 @@ fn main() -> Result<()> {
         .filter_map(|b| { let (d, _, _) = GB18030.decode(b); parse_line(&d, b, &re) }).collect();
     calculate_deltas(&mut entries);
     let histogram = build_histogram(&entries);
-    let mut app = App::new(fold_noise(entries), histogram);
+    let folded = fold_noise(entries);
+
+    let rt = tokio::runtime::Runtime::new()?;
+    let (req_tx, mut req_rx) = mpsc::channel::<String>(1);
+    let (resp_tx, resp_rx) = mpsc::channel::<Result<String, String>>(1);
+
+    rt.spawn(async move {
+        while let Some(context) = req_rx.recv().await {
+            let result = ai_client::analyze_error(context).await
+                .map_err(|e| e.to_string());
+            let _ = resp_tx.send(result).await;
+        }
+    });
+
+    let mut app = App::new(folded, histogram, req_tx, resp_rx);
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     loop {
+        if let Ok(result) = app.ai_rx.try_recv() {
+            app.ai_state = match result {
+                Ok(s) => AiState::Completed(s),
+                Err(e) => AiState::Error(e),
+            };
+        }
+
         terminal.draw(|f| ui(f, &mut app))?;
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press { continue; }
+                
+                if matches!(app.ai_state, AiState::Completed(_) | AiState::Error(_)) {
+                    if key.code == KeyCode::Esc { app.ai_state = AiState::Idle; continue; }
+                }
+                
                 if app.search_mode {
                     match key.code {
                         KeyCode::Esc => app.exit_search(),
@@ -544,6 +634,19 @@ fn main() -> Result<()> {
                         KeyCode::Char('t') | KeyCode::Esc => app.toggle_thread_filter(),
                         KeyCode::Char('c') => app.copy_line(),
                         KeyCode::Char('y') => app.yank_payload(),
+                        KeyCode::Char('a') => {
+                            if matches!(app.ai_state, AiState::Idle) {
+                                if let Some(idx) = app.list_state.selected() {
+                                    let start = idx.saturating_sub(10);
+                                    let end = (idx + 11).min(app.filtered_entries.len());
+                                    let context: String = app.filtered_entries[start..end].iter()
+                                        .map(|e| e.get_content()).collect::<Vec<_>>().join("\n");
+                                    if app.ai_tx.blocking_send(context).is_ok() {
+                                        app.ai_state = AiState::Loading;
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
