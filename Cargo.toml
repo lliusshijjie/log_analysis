@@ -1,0 +1,17 @@
+[package]
+name = "log_analysis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+encoding_rs = "0.8"
+memmap2 = "0.9"
+chrono = "0.4"
+ratatui = "0.29"
+crossterm = "0.28"
+arboard = "3"
+

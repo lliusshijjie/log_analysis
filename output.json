@@ -1,0 +1,301 @@
+﻿{
+  "content": {
+    "assets_settings": {
+      "enable": 1
+    },
+    "common_settings": {
+      "NoProgramUpgrade": 1,
+      "assets_register": {
+        "assets_list": [
+          {
+            "attr_name": "domain_account",
+            "attr_type": 1,
+            "primary_id": 1,
+            "required": 0
+          },
+          {
+            "attr_name": "owner_name",
+            "attr_type": 1,
+            "primary_id": 2,
+            "required": 0
+          },
+          {
+            "attr_name": "email",
+            "attr_type": 1,
+            "primary_id": 3,
+            "required": 0
+          },
+          {
+            "attr_name": "phone",
+            "attr_type": 1,
+            "primary_id": 4,
+            "required": 0
+          },
+          {
+            "attr_name": "position",
+            "attr_type": 1,
+            "primary_id": 5,
+            "required": 0
+          },
+          {
+            "attr_name": "serial_number",
+            "attr_type": 1,
+            "primary_id": 6,
+            "required": 0
+          },
+          {
+            "attr_name": "department_id",
+            "attr_type": 1,
+            "primary_id": 7,
+            "required": 0
+          },
+          {
+            "attr_name": "note",
+            "attr_type": 1,
+            "primary_id": 8,
+            "required": 0
+          }
+        ],
+        "edit_permission": 0,
+        "enable": 0,
+        "force_register": 0
+      },
+      "authorization_settings": {
+        "enable_client_popup": 1,
+        "enable_common_scan": 0,
+        "enable_exception_scan": 0,
+        "enable_manual_scan": 0,
+        "enable_prevent_exit": {
+          "enable": 1,
+          "encrypted_text": "a0da0d772530c42b9ad3375fce59f07bd48b0b522153d953e909ecd4ac9fe89a",
+          "randomized_string": "3baab4e4c5c198db06d606913d502527"
+        },
+        "enable_prevent_unload": {
+          "enable": 1,
+          "encrypted_text": "a0da0d772530c42b9ad3375fce59f07bd48b0b522153d953e909ecd4ac9fe89a",
+          "randomized_string": "3baab4e4c5c198db06d606913d502527"
+        },
+        "enable_quarantine_recovery": 0,
+        "enable_realtime_scan": 0,
+        "enable_scheduled_scan": 0
+      },
+      "communication": {
+        "client_proxy_port": 8446,
+        "direction": 0,
+        "heartbeat_interval": 60,
+        "port": 8445,
+        "remote_desktop": 5900,
+        "resource": {
+          "bandwidth": "128",
+          "cpu": 5,
+          "memory": "200"
+        },
+        "vp_port_all": 4122,
+        "vp_port_server": 4120,
+        "web_console": 8443
+      },
+      "firewall_author": {
+        "enable_firewall_log": 0,
+        "enable_notification": 0,
+        "enable_view": 0
+      },
+      "update": {
+        "client_enable": 0,
+        "enable": 1,
+        "frequency": 0,
+        "osce_update_port": 8080,
+        "pattern_tool": {
+          "pattern_tool_old_days": 5,
+          "pattern_tool_warning_enable": 0
+        },
+        "server_enable": 0,
+        "starting_time": {
+          "day_of_month": 1,
+          "day_of_week": 1,
+          "hour": 12,
+          "interval": 1,
+          "minute": 30
+        }
+      }
+    },
+    "devops_policy": "",
+    "edr_policy": {
+      "IOA_engine": {
+        "builtIn_rules": 1,
+        "custom_rules": 0,
+        "enable": 1
+      },
+      "aggregation_enable": 1,
+      "api": {
+        "enable": 1,
+        "process_name": [],
+        "process_path": []
+      },
+      "bas": {
+        "enable": 0
+      },
+      "confidence_level": 2,
+      "config": {
+        "enable": 1,
+        "record_details": [],
+        "registry_path": []
+      },
+      "detect_alert_settings": {
+        "one_min_max_alerts": 100,
+        "one_rawlog_max_alerts": 2,
+        "same_event_merge_duration": 186
+      },
+      "detection_scope": 1,
+      "edr_enable": 1,
+      "file": {
+        "enable": 1,
+        "enable_ext": 0,
+        "level": 2,
+        "list": {
+          "items": [],
+          "type": 1
+        },
+        "record_details": [
+          2
+        ]
+      },
+      "im_policy": {
+        "blocking_mode": {
+          "allow_appeal": 1,
+          "control_measures": 0,
+          "enable": 0,
+          "im_channels": {
+            "chrome": {
+              "enable": 1
+            },
+            "dingding": {
+              "enable": 1
+            },
+            "edge": {
+              "enable": 1
+            },
+            "feishu": {
+              "enable": 1
+            },
+            "firefox": {
+              "enable": 1
+            },
+            "outlook": {
+              "enable": 1
+            },
+            "qq": {
+              "enable": 1
+            },
+            "wechat": {
+              "enable": 1
+            },
+            "work_we_chat": {
+              "enable": 1
+            },
+            "xinjie": {
+              "enable": 1
+            }
+          },
+          "message": "检测到社工钓鱼攻击行为，已阻止程序运行",
+          "message_notification": 1
+        },
+        "download_control_mode": {
+          "allow_appeal": 1,
+          "control_measures": 0,
+          "enable": 0,
+          "im_channels": {
+            "chrome": {
+              "enable": 1
+            },
+            "dingding": {
+              "enable": 1
+            },
+            "edge": {
+              "enable": 1
+            },
+            "feishu": {
+              "enable": 1
+            },
+            "firefox": {
+              "enable": 1
+            },
+            "outlook": {
+              "enable": 1
+            },
+            "qq": {
+              "enable": 1
+            },
+            "wechat": {
+              "enable": 1
+            },
+            "work_we_chat": {
+              "enable": 1
+            },
+            "xinjie": {
+              "enable": 1
+            }
+          },
+          "message": "检测到违反下载管控规则的行为，已阻止文件下载",
+          "message_notification": 1,
+          "prohibited_downloads": {
+            "compressed_file": 1,
+            "doc_file": 1,
+            "executable_file": 1,
+            "script_file": 1
+          }
+        },
+        "enable": 0,
+        "learning_mode": {
+          "content": "学习模式已持续学习14天，为您识别可执行程序的运行情况并生成了学习列表，建议前往学习列表查看，根据实际情况配置白名单/黑名单，可切换至阻断模式进行自动防护。",
+          "enable": 1,
+          "learning_days": 14,
+          "message_notification": 1,
+          "to_emails": [],
+          "topic": "学习模式已完成，请前往查看学习列表并配置黑白名单，切换至自动防护"
+        }
+      },
+      "network": {
+        "enable": 1,
+        "ip_list": [],
+        "protocol_list": []
+      },
+      "process": {
+        "enable": 1,
+        "list": [],
+        "record_details": []
+      },
+      "record_level": 0,
+      "rules_edit": 0,
+      "schtask": {
+        "enable": 1,
+        "record_details": []
+      },
+      "shell": {
+        "enable": 1,
+        "record_details": []
+      },
+      "system": {
+        "enable": 1,
+        "record_details": []
+      },
+      "wmi": {
+        "enable": 1,
+        "record_details": []
+      }
+    },
+    "encrypt_password": {
+      "enable_prevent_exit_encrypted_text": "3006adb0101bc0e0c8a7db9f437a35df",
+      "enable_prevent_unload_encrypted_text": "3006adb0101bc0e0c8a7db9f437a35df"
+    },
+    "web_reputation_settings": {}
+  },
+  "description": "",
+  "msp_uuid": "default",
+  "policy_guid": "3d42dfc0-9454-11f0-9aa6-72333209e4fa",
+  "policy_id": 1,
+  "policy_name": "默认策略",
+  "policy_type": 0,
+  "policy_version": "1.1.0",
+  "tenant_uuid": "default",
+  "update_time": 1758174997
+}
