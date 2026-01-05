@@ -25,7 +25,7 @@ pub async fn analyze_error(log_context: String) -> Result<String> {
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(300))
         .build()?;
     let resp = client.post(OLLAMA_URL)
         .json(&OllamaRequest { model: MODEL.into(), prompt, stream: false })

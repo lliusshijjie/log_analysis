@@ -1,17 +1,20 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::stdout;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use arboard::Clipboard;
 use chrono::NaiveDateTime;
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
 use encoding_rs::GB18030;
+use glob::glob;
 use memmap2::Mmap;
 use ratatui::{
     prelude::*,
@@ -25,6 +28,24 @@ use tokio::sync::mpsc;
 
 mod ai_client;
 
+#[derive(Parser)]
+#[command(name = "log_analysis", about = "TUI log analyzer")]
+struct Args {
+    #[arg(required = true)]
+    files: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct FileInfo {
+    id: usize,
+    name: String,
+    color: Color,
+    enabled: bool,
+}
+
+#[derive(Default, Clone, Copy, PartialEq)]
+enum Focus { #[default] LogList, FileList }
+
 #[derive(Debug, Serialize, Clone)]
 struct LogEntry {
     timestamp: String,
@@ -36,6 +57,7 @@ struct LogEntry {
     line_num: u32,
     json_payload: Option<Value>,
     delta_ms: Option<i64>,
+    source_id: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +85,9 @@ impl DisplayEntry {
             DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
         }
     }
+    fn get_source_id(&self) -> Option<usize> {
+        match self { DisplayEntry::Normal(log) => Some(log.source_id), _ => None }
+    }
 }
 
 #[derive(Default)]
@@ -74,6 +99,12 @@ enum AiState {
     Error(String),
 }
 
+#[derive(Clone)]
+struct LevelVisibility { info: bool, warn: bool, error: bool, debug: bool }
+impl Default for LevelVisibility {
+    fn default() -> Self { Self { info: true, warn: true, error: true, debug: true } }
+}
+
 struct App {
     all_entries: Vec<DisplayEntry>,
     filtered_entries: Vec<DisplayEntry>,
@@ -82,6 +113,7 @@ struct App {
     search_mode: bool,
     search_query: String,
     search_regex: Option<Regex>,
+    negative_search: bool,
     match_indices: Vec<usize>,
     current_match: usize,
     status_msg: Option<(String, Instant)>,
@@ -90,12 +122,20 @@ struct App {
     ai_state: AiState,
     ai_tx: mpsc::Sender<String>,
     ai_rx: mpsc::Receiver<Result<String, String>>,
+    bookmarks: BTreeSet<usize>,
+    visible_levels: LevelVisibility,
+    show_help: bool,
+    files: Vec<FileInfo>,
+    focus: Focus,
+    file_list_state: ListState,
 }
 
 impl App {
-    fn new(entries: Vec<DisplayEntry>, histogram: Vec<(String, u64)>, ai_tx: mpsc::Sender<String>, ai_rx: mpsc::Receiver<Result<String, String>>) -> Self {
+    fn new(entries: Vec<DisplayEntry>, histogram: Vec<(String, u64)>, files: Vec<FileInfo>, ai_tx: mpsc::Sender<String>, ai_rx: mpsc::Receiver<Result<String, String>>) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() { list_state.select(Some(0)); }
+        let mut file_list_state = ListState::default();
+        if !files.is_empty() { file_list_state.select(Some(0)); }
         Self {
             all_entries: entries.clone(),
             filtered_entries: entries,
@@ -104,6 +144,7 @@ impl App {
             search_mode: false,
             search_query: String::new(),
             search_regex: None,
+            negative_search: false,
             match_indices: Vec::new(),
             current_match: 0,
             status_msg: None,
@@ -111,6 +152,10 @@ impl App {
             histogram,
             ai_state: AiState::Idle,
             ai_tx, ai_rx,
+            bookmarks: BTreeSet::new(),
+            visible_levels: LevelVisibility::default(),
+            show_help: false,
+            files, focus: Focus::LogList, file_list_state,
         }
     }
 
@@ -144,18 +189,44 @@ impl App {
     }
 
     fn apply_filter(&mut self) {
-        self.filtered_entries = self.all_entries.iter()
-            .filter(|e| self.filter_tid.as_ref().map_or(true, |tid| e.get_tid() == Some(tid)))
-            .cloned().collect();
+        let enabled_files: Vec<usize> = self.files.iter().filter(|f| f.enabled).map(|f| f.id).collect();
+        self.filtered_entries = self.all_entries.iter().enumerate()
+            .filter(|(_, e)| {
+                // File filter
+                if let Some(sid) = e.get_source_id() {
+                    if !enabled_files.contains(&sid) { return false; }
+                }
+                // Thread filter
+                if let Some(tid) = &self.filter_tid {
+                    if e.get_tid() != Some(tid) { return false; }
+                }
+                // Level filter
+                if let DisplayEntry::Normal(log) = e {
+                    let level = log.level.to_lowercase();
+                    if level.contains("info") && !self.visible_levels.info { return false; }
+                    if level.contains("warn") && !self.visible_levels.warn { return false; }
+                    if level.contains("error") && !self.visible_levels.error { return false; }
+                    if level.contains("debug") && !self.visible_levels.debug { return false; }
+                }
+                true
+            })
+            .map(|(_, e)| e.clone()).collect();
         self.list_state.select(if self.filtered_entries.is_empty() { None } else { Some(0) });
         self.update_search_matches();
     }
 
-    fn start_search(&mut self) { self.search_mode = true; self.search_query.clear(); }
+    fn start_search(&mut self) { self.search_mode = true; self.search_query.clear(); self.negative_search = false; }
     fn exit_search(&mut self) { self.search_mode = false; }
 
     fn update_search(&mut self) {
-        self.search_regex = Regex::new(&self.search_query).ok();
+        if self.search_query.starts_with('!') {
+            self.negative_search = true;
+            let pattern = &self.search_query[1..];
+            self.search_regex = if pattern.is_empty() { None } else { Regex::new(pattern).ok() };
+        } else {
+            self.negative_search = false;
+            self.search_regex = Regex::new(&self.search_query).ok();
+        }
         self.update_search_matches();
     }
 
@@ -163,7 +234,9 @@ impl App {
         self.match_indices.clear();
         if let Some(re) = &self.search_regex {
             for (i, entry) in self.filtered_entries.iter().enumerate() {
-                if re.is_match(&entry.get_searchable_text()) { self.match_indices.push(i); }
+                let matches = re.is_match(&entry.get_searchable_text());
+                if self.negative_search { if !matches { self.match_indices.push(i); } }
+                else { if matches { self.match_indices.push(i); } }
             }
         }
         self.current_match = 0;
@@ -179,6 +252,31 @@ impl App {
         if self.match_indices.is_empty() { return; }
         self.current_match = self.current_match.checked_sub(1).unwrap_or(self.match_indices.len() - 1);
         self.list_state.select(Some(self.match_indices[self.current_match]));
+    }
+
+    fn toggle_bookmark(&mut self) {
+        if let Some(idx) = self.list_state.selected() {
+            if !self.bookmarks.remove(&idx) { self.bookmarks.insert(idx); }
+        }
+    }
+
+    fn next_bookmark(&mut self) {
+        if self.bookmarks.is_empty() { return; }
+        let current = self.list_state.selected().unwrap_or(0);
+        let next = self.bookmarks.range((current + 1)..).next()
+            .or_else(|| self.bookmarks.iter().next());
+        if let Some(&idx) = next { self.list_state.select(Some(idx)); }
+    }
+
+    fn toggle_level(&mut self, level: u8) {
+        match level {
+            1 => self.visible_levels.info = !self.visible_levels.info,
+            2 => self.visible_levels.warn = !self.visible_levels.warn,
+            3 => self.visible_levels.error = !self.visible_levels.error,
+            4 => self.visible_levels.debug = !self.visible_levels.debug,
+            _ => {}
+        }
+        self.apply_filter();
     }
 
     fn copy_line(&mut self) {
@@ -207,6 +305,24 @@ impl App {
     fn status_message(&self) -> Option<&str> {
         self.status_msg.as_ref().filter(|(_, t)| t.elapsed() < Duration::from_secs(2)).map(|(s, _)| s.as_str())
     }
+
+    fn toggle_file(&mut self) {
+        if let Some(idx) = self.file_list_state.selected() {
+            if let Some(f) = self.files.get_mut(idx) { f.enabled = !f.enabled; }
+            self.apply_filter();
+        }
+    }
+
+    fn solo_file(&mut self) {
+        if let Some(idx) = self.file_list_state.selected() {
+            for (i, f) in self.files.iter_mut().enumerate() { f.enabled = i == idx; }
+            self.apply_filter();
+        }
+    }
+
+    fn get_file_color(&self, source_id: usize) -> Color {
+        self.files.iter().find(|f| f.id == source_id).map(|f| f.color).unwrap_or(Color::White)
+    }
 }
 
 fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
@@ -219,7 +335,7 @@ fn extract_json_from_bytes(line_bytes: &[u8]) -> Option<Value> {
     serde_json::from_str(&String::from_utf8_lossy(&line_bytes[start + 1..end + 1])).ok()
 }
 
-fn parse_line(line: &str, line_bytes: &[u8], re: &Regex) -> Option<LogEntry> {
+fn parse_line(line: &str, line_bytes: &[u8], re: &Regex, source_id: usize) -> Option<LogEntry> {
     let caps = re.captures(line)?;
     Some(LogEntry {
         timestamp: caps.get(1)?.as_str().into(),
@@ -231,6 +347,7 @@ fn parse_line(line: &str, line_bytes: &[u8], re: &Regex) -> Option<LogEntry> {
         line_num: caps.get(7)?.as_str().parse().ok()?,
         json_payload: extract_json_from_bytes(line_bytes),
         delta_ms: None,
+        source_id,
     })
 }
 
@@ -333,12 +450,16 @@ fn highlight_text(text: &str, regex: Option<&Regex>, base_style: Style) -> Vec<S
     spans
 }
 
-fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool) -> ListItem<'static> {
-    let marker = if is_match { "● " } else { "  " };
+fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool, is_bookmarked: bool, file_color: Color) -> ListItem<'static> {
+    let color_bar = "█ ";
+    let bookmark = if is_bookmarked { "🔖" } else { " " };
+    let marker = if is_match { "●" } else { " " };
     match entry {
         DisplayEntry::Normal(log) => {
-            let preview: String = log.content.chars().take(40).collect();
+            let preview: String = log.content.chars().take(35).collect();
             let mut spans: Vec<Span<'static>> = vec![
+                Span::styled(color_bar.to_string(), Style::default().fg(file_color)),
+                Span::styled(bookmark.to_string(), Style::default().fg(Color::Magenta)),
                 Span::styled(marker.to_string(), Style::default().fg(Color::Yellow)),
                 Span::styled(log.timestamp[11..19].to_string(), Style::default().fg(Color::DarkGray)),
                 Span::raw(" "),
@@ -348,15 +469,16 @@ fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool)
                 spans.push(Span::raw(" "));
             }
             spans.extend(vec![
-                Span::styled(format!("{}:{}", &log.pid, &log.tid), Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
                 Span::styled(format!("[{:5}]", &log.level), Style::default().fg(level_color(&log.level))),
                 Span::raw(" "),
             ]);
             spans.extend(highlight_text(&preview, regex, Style::default()));
-            ListItem::new(Line::from(spans))
+            let style = if is_bookmarked { Style::default().bg(Color::Rgb(40, 40, 60)) } else { Style::default() };
+            ListItem::new(Line::from(spans)).style(style)
         }
         DisplayEntry::Folded { count, summary_text, .. } => ListItem::new(Line::from(vec![
+            Span::styled(color_bar.to_string(), Style::default().fg(file_color)),
+            Span::styled(bookmark.to_string(), Style::default().fg(Color::Magenta)),
             Span::styled(marker.to_string(), Style::default().fg(Color::Yellow)),
             Span::styled(format!("▶ [{} lines] ", count), Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
             Span::styled(summary_text.clone(), Style::default().fg(Color::DarkGray)),
@@ -441,13 +563,34 @@ fn render_detail(entry: Option<&DisplayEntry>) -> Text<'static> {
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
+    // Main horizontal split: sidebar (20%) | content (80%)
+    let main_chunks = Layout::horizontal([Constraint::Percentage(18), Constraint::Percentage(82)]).split(frame.area());
+    let sidebar_area = main_chunks[0];
+    let content_area = main_chunks[1];
+
+    // Sidebar: File list
+    let file_items: Vec<ListItem> = app.files.iter().map(|f| {
+        let mark = if f.enabled { "[x]" } else { "[ ]" };
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("{} ", mark), Style::default().fg(Color::White)),
+            Span::styled(&f.name, Style::default().fg(f.color)),
+        ]))
+    }).collect();
+    let sidebar_style = if app.focus == Focus::FileList { Style::default().fg(Color::Cyan) } else { Style::default() };
+    let file_list = List::new(file_items)
+        .block(Block::default().borders(Borders::ALL).title(" Files ").border_style(sidebar_style))
+        .highlight_style(Style::default().bg(Color::DarkGray))
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(file_list, sidebar_area, &mut app.file_list_state);
+
+    // Content area vertical split
     let show_search = app.search_mode;
     let constraints = if show_search {
         vec![Constraint::Min(10), Constraint::Length(3), Constraint::Length(12), Constraint::Length(7)]
     } else {
         vec![Constraint::Min(10), Constraint::Length(0), Constraint::Length(12), Constraint::Length(7)]
     };
-    let chunks = Layout::default().direction(Direction::Vertical).constraints(constraints).split(frame.area());
+    let chunks = Layout::default().direction(Direction::Vertical).constraints(constraints).split(content_area);
 
     // Title
     let title = match (&app.filter_tid, &app.search_regex) {
@@ -460,15 +603,17 @@ fn ui(frame: &mut Frame, app: &mut App) {
         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
     } else { Style::default() };
 
-    // List
+    // Log List with color bar
     let entries = app.entries().clone();
     let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, e)| {
-        render_list_item(e, app.search_regex.as_ref(), app.match_indices.contains(&i))
+        let file_color = e.get_source_id().map(|sid| app.get_file_color(sid)).unwrap_or(Color::White);
+        render_list_item(e, app.search_regex.as_ref(), app.match_indices.contains(&i), app.bookmarks.contains(&i), file_color)
     }).collect();
 
-    let help = if show_search { "ESC=exit" } else { "/=search t=thread c=copy y=yank q=quit" };
+    let help = if show_search { "ESC=exit  !term=exclude" } else { "Tab=switch Space=toggle Enter=solo" };
+    let list_style = if app.focus == Focus::LogList { Style::default().fg(Color::Cyan) } else { Style::default() };
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title).title_style(title_style).title_bottom(Line::from(help).right_aligned()))
+        .block(Block::default().borders(Borders::ALL).title(title).title_style(title_style).title_bottom(Line::from(help).right_aligned()).border_style(list_style))
         .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, chunks[0], &mut app.list_state);
@@ -548,6 +693,24 @@ fn ui(frame: &mut Frame, app: &mut App) {
         }
         AiState::Idle => {}
     }
+
+    // Help Popup
+    if app.show_help {
+        let area = centered_rect(60, 50, frame.area());
+        frame.render_widget(Clear, area);
+        let help_text = "\
+Navigation:  ↑/↓ or k/j (Scroll), n/N (Next/Prev Match)
+Search:      / (Find), !term (Exclude matching)
+Filters:     t (Thread Focus), 1/2/3/4 (Info/Warn/Err/Debug)
+Bookmarks:   m (Toggle Mark), Tab (Next Bookmark)
+Actions:     a (AI Analyze), c (Copy Line), y (Yank JSON)
+Quit:        q (Exit), Esc (Close popup)";
+        let popup = Paragraph::new(help_text)
+            .block(Block::default().borders(Borders::ALL)
+                .title(" ❓ Help (Press ? or Esc to close) ")
+                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+        frame.render_widget(popup, area);
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -568,17 +731,39 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).map(|s| s.as_str()).unwrap_or("AisEsmEmc.log");
-    let file = File::open(path).with_context(|| format!("无法打开日志文件: {}", path))?;
-    let mmap = unsafe { Mmap::map(&file)? };
+    let args = Args::parse();
+    let colors = [Color::Red, Color::Blue, Color::Green, Color::Yellow, Color::Cyan, Color::Magenta];
     let re = Regex::new(r"^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d+)\[([0-9a-f]+):([0-9a-f]+)\]\[(\w+)\]:\s*(.*)\((.+):(\d+)\)\s*$")?;
     
-    let mut entries: Vec<LogEntry> = merge_multiline_bytes(&mmap).iter()
-        .filter_map(|b| { let (d, _, _) = GB18030.decode(b); parse_line(&d, b, &re) }).collect();
-    calculate_deltas(&mut entries);
-    let histogram = build_histogram(&entries);
-    let folded = fold_noise(entries);
+    // Expand globs and collect file paths
+    let mut file_paths: Vec<PathBuf> = Vec::new();
+    for pattern in &args.files {
+        for entry in glob(pattern).with_context(|| format!("无效模式: {}", pattern))? {
+            file_paths.push(entry?);
+        }
+    }
+    if file_paths.is_empty() { anyhow::bail!("没有找到匹配的文件"); }
+
+    // Load files
+    let mut files: Vec<FileInfo> = Vec::new();
+    let mut all_entries: Vec<LogEntry> = Vec::new();
+    for (id, path) in file_paths.iter().enumerate() {
+        let file = File::open(path).with_context(|| format!("无法打开: {:?}", path))?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        let entries: Vec<LogEntry> = merge_multiline_bytes(&mmap).iter()
+            .filter_map(|b| { let (d, _, _) = GB18030.decode(b); parse_line(&d, b, &re, id) }).collect();
+        files.push(FileInfo {
+            id, name: path.file_name().map(|s| s.to_string_lossy().into()).unwrap_or_else(|| "?".into()),
+            color: colors[id % colors.len()], enabled: true,
+        });
+        all_entries.extend(entries);
+    }
+
+    // Sort by timestamp
+    all_entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    calculate_deltas(&mut all_entries);
+    let histogram = build_histogram(&all_entries);
+    let folded = fold_noise(all_entries);
 
     let rt = tokio::runtime::Runtime::new()?;
     let (req_tx, mut req_rx) = mpsc::channel::<String>(1);
@@ -592,7 +777,7 @@ fn main() -> Result<()> {
         }
     });
 
-    let mut app = App::new(folded, histogram, req_tx, resp_rx);
+    let mut app = App::new(folded, histogram, files, req_tx, resp_rx);
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -623,31 +808,70 @@ fn main() -> Result<()> {
                         KeyCode::Char(c) => { app.search_query.push(c); app.update_search(); }
                         _ => {}
                     }
+                } else if app.show_help {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => app.show_help = false,
+                        _ => {}
+                    }
                 } else {
                     match key.code {
                         KeyCode::Char('q') => break,
-                        KeyCode::Up | KeyCode::Char('k') => app.previous(),
-                        KeyCode::Down | KeyCode::Char('j') => app.next(),
-                        KeyCode::Char('/') => app.start_search(),
-                        KeyCode::Char('n') => app.next_match(),
-                        KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => app.prev_match(),
-                        KeyCode::Char('t') | KeyCode::Esc => app.toggle_thread_filter(),
-                        KeyCode::Char('c') => app.copy_line(),
-                        KeyCode::Char('y') => app.yank_payload(),
-                        KeyCode::Char('a') => {
-                            if matches!(app.ai_state, AiState::Idle) {
-                                if let Some(idx) = app.list_state.selected() {
-                                    let start = idx.saturating_sub(10);
-                                    let end = (idx + 11).min(app.filtered_entries.len());
-                                    let context: String = app.filtered_entries[start..end].iter()
-                                        .map(|e| e.get_content()).collect::<Vec<_>>().join("\n");
-                                    if app.ai_tx.blocking_send(context).is_ok() {
-                                        app.ai_state = AiState::Loading;
+                        KeyCode::Tab => app.focus = if app.focus == Focus::LogList { Focus::FileList } else { Focus::LogList },
+                        KeyCode::Char('?') => app.show_help = true,
+                        _ => {}
+                    }
+                    // Focus-specific actions
+                    match app.focus {
+                        Focus::FileList => match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let len = app.files.len();
+                                if len > 0 {
+                                    let i = app.file_list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+                                    app.file_list_state.select(Some(i));
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let len = app.files.len();
+                                if len > 0 {
+                                    let i = app.file_list_state.selected().map(|i| (i + 1).min(len - 1)).unwrap_or(0);
+                                    app.file_list_state.select(Some(i));
+                                }
+                            }
+                            KeyCode::Char(' ') => app.toggle_file(),
+                            KeyCode::Enter => app.solo_file(),
+                            _ => {}
+                        }
+                        Focus::LogList => match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => app.previous(),
+                            KeyCode::Down | KeyCode::Char('j') => app.next(),
+                            KeyCode::Char('/') => app.start_search(),
+                            KeyCode::Char('n') => app.next_match(),
+                            KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => app.prev_match(),
+                            KeyCode::Char('t') => app.toggle_thread_filter(),
+                            KeyCode::Esc => { app.filter_tid = None; app.apply_filter(); }
+                            KeyCode::Char('c') => app.copy_line(),
+                            KeyCode::Char('y') => app.yank_payload(),
+                            KeyCode::Char('m') => app.toggle_bookmark(),
+                            KeyCode::Char('b') => app.next_bookmark(),
+                            KeyCode::Char('1') => app.toggle_level(1),
+                            KeyCode::Char('2') => app.toggle_level(2),
+                            KeyCode::Char('3') => app.toggle_level(3),
+                            KeyCode::Char('4') => app.toggle_level(4),
+                            KeyCode::Char('a') => {
+                                if matches!(app.ai_state, AiState::Idle) {
+                                    if let Some(idx) = app.list_state.selected() {
+                                        let start = idx.saturating_sub(10);
+                                        let end = (idx + 11).min(app.filtered_entries.len());
+                                        let context: String = app.filtered_entries[start..end].iter()
+                                            .map(|e| e.get_content()).collect::<Vec<_>>().join("\n");
+                                        if app.ai_tx.blocking_send(context).is_ok() {
+                                            app.ai_state = AiState::Loading;
+                                        }
                                     }
                                 }
                             }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }
