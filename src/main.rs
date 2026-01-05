@@ -369,7 +369,7 @@ fn build_histogram(entries: &[LogEntry]) -> Vec<(String, u64)> {
     let mut counts: HashMap<String, u64> = HashMap::new();
     for entry in entries {
         if let Some(ts) = parse_timestamp(&entry.timestamp) {
-            let key = ts.format("%m-%d %H:%M").to_string();
+            let key = ts.format("%m-%d %H:00").to_string();
             *counts.entry(key).or_insert(0) += 1;
         }
     }
@@ -586,9 +586,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
     // Content area vertical split
     let show_search = app.search_mode;
     let constraints = if show_search {
-        vec![Constraint::Min(10), Constraint::Length(3), Constraint::Length(12), Constraint::Length(7)]
+        vec![Constraint::Min(10), Constraint::Length(3), Constraint::Length(10), Constraint::Length(10)]
     } else {
-        vec![Constraint::Min(10), Constraint::Length(0), Constraint::Length(12), Constraint::Length(7)]
+        vec![Constraint::Min(10), Constraint::Length(0), Constraint::Length(10), Constraint::Length(10)]
     };
     let chunks = Layout::default().direction(Direction::Vertical).constraints(constraints).split(content_area);
 
@@ -639,8 +639,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
     let max_bars = (hist_area.width as usize).saturating_sub(10) / 10;
     let hist_data: Vec<_> = app.histogram.iter().rev().take(max_bars).rev()
         .map(|(label, val)| {
-            let color = if *val > 100 { Color::Red } else if *val > 50 { Color::Yellow } else { Color::Cyan };
+            let color = if *val > 500 { Color::Red } else if *val > 250 { Color::Rgb(255, 165, 0) } else { Color::Cyan };
             Bar::default().value(*val).label(Line::from(label.clone())).style(Style::default().fg(color))
+                .text_value(format!("{}", val))
         }).collect();
 
     let max_val = app.histogram.iter().map(|(_, v)| *v).max().unwrap_or(1);
@@ -657,15 +658,16 @@ fn ui(frame: &mut Frame, app: &mut App) {
             ]))
             .title_bottom(Line::from(vec![
                 Span::styled(" █", Style::default().fg(Color::Red)),
-                Span::styled(">100 ", Style::default().fg(Color::DarkGray)),
-                Span::styled("█", Style::default().fg(Color::Yellow)),
-                Span::styled(">50 ", Style::default().fg(Color::DarkGray)),
+                Span::styled(">250 ", Style::default().fg(Color::DarkGray)),
+                Span::styled("█", Style::default().fg(Color::Rgb(255, 165, 0))),
+                Span::styled(">150 ", Style::default().fg(Color::DarkGray)),
                 Span::styled("█", Style::default().fg(Color::Cyan)),
                 Span::styled("正常 ", Style::default().fg(Color::DarkGray)),
             ]).right_aligned()))
         .data(BarGroup::default().bars(&hist_data))
         .bar_width(12)
         .bar_gap(3)
+        .direction(Direction::Vertical)
         .value_style(Style::default().fg(Color::White).bg(Color::Black))
         .max(max_val);
     frame.render_widget(chart, hist_area);
@@ -792,7 +794,7 @@ fn main() -> Result<()> {
         }
 
         terminal.draw(|f| ui(f, &mut app))?;
-        if event::poll(Duration::from_millis(50))? {
+        if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press { continue; }
                 
