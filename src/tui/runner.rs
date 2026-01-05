@@ -6,8 +6,8 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
 
 use crate::app_state::App;
-use crate::models::{AiState, Focus};
-use super::components::{render_ai_popup, render_detail_pane, render_help_popup, render_histogram, render_log_list, render_search_bar, render_sidebar};
+use crate::models::{AiState, Focus, InputMode};
+use super::components::{render_ai_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
 use super::layout::create_layout;
 
 fn ui(frame: &mut Frame, app: &mut App) {
@@ -19,6 +19,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_histogram(frame, app, layout.histogram);
     render_ai_popup(frame, app);
     if app.show_help { render_help_popup(frame); }
+    render_jump_popup(frame, app);
 }
 
 pub fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
@@ -40,20 +41,37 @@ pub fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App)
                     if key.code == KeyCode::Esc { app.ai_state = AiState::Idle; continue; }
                 }
 
+                if app.input_mode == InputMode::JumpInput {
+                    match key.code {
+                        KeyCode::Esc => app.exit_jump_mode(),
+                        KeyCode::Enter => app.submit_jump(),
+                        KeyCode::Backspace => { app.input_buffer.pop(); }
+                        KeyCode::Char(c) if c.is_ascii_digit() => app.input_buffer.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
+                
                 if app.search_mode {
                     match key.code {
                         KeyCode::Esc => app.exit_search(),
                         KeyCode::Enter => { app.update_search(); app.exit_search(); }
-                        KeyCode::Backspace => { app.search_query.pop(); app.update_search(); }
-                        KeyCode::Char(c) => { app.search_query.push(c); app.update_search(); }
+                        KeyCode::Backspace => { app.search_query.pop(); }
+                        KeyCode::Char(c) => { app.search_query.push(c); }
                         _ => {}
                     }
-                } else if app.show_help {
+                    continue;
+                }
+                
+                if app.show_help {
                     match key.code {
                         KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => app.show_help = false,
                         _ => {}
                     }
-                } else {
+                    continue;
+                }
+                
+                {
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::Tab => app.focus = if app.focus == Focus::LogList { Focus::FileList } else { Focus::LogList },
@@ -83,6 +101,9 @@ pub fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App)
                         Focus::LogList => match key.code {
                             KeyCode::Up | KeyCode::Char('k') => app.previous(),
                             KeyCode::Down | KeyCode::Char('j') => app.next(),
+                            KeyCode::Char('g') => app.jump_to_top(),
+                            KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => app.jump_to_bottom(),
+                            KeyCode::Char(':') => app.enter_jump_mode(),
                             KeyCode::Char('/') => app.start_search(),
                             KeyCode::Char('n') => app.next_match(),
                             KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => app.prev_match(),

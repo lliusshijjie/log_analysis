@@ -7,7 +7,7 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
-use crate::models::{AiState, DisplayEntry, FileInfo, Focus, LevelVisibility};
+use crate::models::{AiState, DisplayEntry, FileInfo, Focus, InputMode, LevelVisibility};
 
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
@@ -32,6 +32,8 @@ pub struct App {
     pub files: Vec<FileInfo>,
     pub focus: Focus,
     pub file_list_state: ListState,
+    pub input_mode: InputMode,
+    pub input_buffer: String,
 }
 
 impl App {
@@ -69,6 +71,8 @@ impl App {
             files,
             focus: Focus::LogList,
             file_list_state,
+            input_mode: InputMode::Normal,
+            input_buffer: String::new(),
         }
     }
 
@@ -240,5 +244,35 @@ impl App {
 
     pub fn get_file_color(&self, source_id: usize) -> Color {
         self.files.iter().find(|f| f.id == source_id).map(|f| f.color).unwrap_or(Color::White)
+    }
+
+    pub fn enter_jump_mode(&mut self) {
+        self.input_mode = InputMode::JumpInput;
+        self.input_buffer.clear();
+    }
+
+    pub fn exit_jump_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.input_buffer.clear();
+    }
+
+    pub fn submit_jump(&mut self) {
+        if let Ok(line_num) = self.input_buffer.parse::<usize>() {
+            if let Some(idx) = self.filtered_entries.iter().position(|e| e.get_line_index() == Some(line_num)) {
+                self.list_state.select(Some(idx));
+            } else {
+                self.status_msg = Some(("Line not found".into(), Instant::now()));
+            }
+        }
+        self.exit_jump_mode();
+    }
+
+    pub fn jump_to_top(&mut self) {
+        if !self.filtered_entries.is_empty() { self.list_state.select(Some(0)); }
+    }
+
+    pub fn jump_to_bottom(&mut self) {
+        let len = self.filtered_entries.len();
+        if len > 0 { self.list_state.select(Some(len - 1)); }
     }
 }

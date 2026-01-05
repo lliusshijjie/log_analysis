@@ -6,7 +6,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::app_state::App;
-use crate::models::{AiState, DisplayEntry, Focus};
+use crate::models::{AiState, DisplayEntry, Focus, InputMode};
 use crate::tui::layout::centered_rect;
 
 fn level_color(level: &str) -> Color {
@@ -43,14 +43,15 @@ fn highlight_text(text: &str, regex: Option<&Regex>, base_style: Style) -> Vec<S
 }
 
 fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool, is_bookmarked: bool, file_color: Color) -> ListItem<'static> {
-    let color_bar = "█ ";
+    let line_idx = entry.get_line_index().map(|n| format!("{:>5} ", n)).unwrap_or_else(|| "      ".into());
     let bookmark = if is_bookmarked { "🔖" } else { " " };
     let marker = if is_match { "●" } else { " " };
     match entry {
         DisplayEntry::Normal(log) => {
-            let preview: String = log.content.chars().take(120).collect();
+            let preview: String = log.content.chars().take(100).collect();
             let mut spans: Vec<Span<'static>> = vec![
-                Span::styled(color_bar.to_string(), Style::default().fg(file_color)),
+                Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
+                Span::styled("█ ", Style::default().fg(file_color)),
                 Span::styled(bookmark.to_string(), Style::default().fg(Color::Magenta)),
                 Span::styled(marker.to_string(), Style::default().fg(Color::Yellow)),
                 Span::styled(log.timestamp[11..19].to_string(), Style::default().fg(Color::DarkGray)),
@@ -69,7 +70,8 @@ fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool,
             ListItem::new(Line::from(spans)).style(style)
         }
         DisplayEntry::Folded { count, summary_text, .. } => ListItem::new(Line::from(vec![
-            Span::styled(color_bar.to_string(), Style::default().fg(file_color)),
+            Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
+            Span::styled("█ ", Style::default().fg(file_color)),
             Span::styled(bookmark.to_string(), Style::default().fg(Color::Magenta)),
             Span::styled(marker.to_string(), Style::default().fg(Color::Yellow)),
             Span::styled(format!("▶ [{} lines] ", count), Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
@@ -258,7 +260,7 @@ pub fn render_ai_popup(frame: &mut Frame, app: &App) {
         AiState::Loading => {
             let area = centered_rect(40, 5, frame.area());
             frame.render_widget(Clear, area);
-            let popup = Paragraph::new("⏳ AI 分析中...")
+            let popup = Paragraph::new("⏳ AI 分析中，等耐心等待...")
                 .alignment(Alignment::Center)
                 .block(Block::default().borders(Borders::ALL).title(" AI 诊断 "));
             frame.render_widget(popup, area);
@@ -283,14 +285,49 @@ pub fn render_help_popup(frame: &mut Frame) {
     frame.render_widget(Clear, area);
     let help_text = "\
 Navigation:  ↑/↓ or k/j (Scroll), n/N (Next/Prev Match)
+             g (Top), G (Bottom), : (Go to Line)
 Search:      / (Find), !term (Exclude matching)
 Filters:     t (Thread Focus), 1/2/3/4 (Info/Warn/Err/Debug)
-Bookmarks:   m (Toggle Mark), Tab (Next Bookmark)
+Bookmarks:   m (Toggle Mark), b (Next Bookmark)
 Actions:     a (AI Analyze), c (Copy Line), y (Yank JSON)
 Quit:        q (Exit), Esc (Close popup)";
     let popup = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL)
             .title(" ❓ Help (Press ? or Esc to close) ")
             .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+    frame.render_widget(popup, area);
+}
+
+pub fn render_jump_popup(frame: &mut Frame, app: &App) {
+    if app.input_mode != InputMode::JumpInput { return; }
+    
+    let area = frame.area();
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(3),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+    let area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Percentage(20),
+            Constraint::Percentage(40),
+        ])
+        .split(popup_layout[1])[1];
+
+    frame.render_widget(Clear, area);
+    let text = Line::from(vec![
+        Span::styled(":", Style::default().fg(Color::Yellow)),
+        Span::styled(app.input_buffer.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("█", Style::default().fg(Color::Gray)),
+    ]);
+    let popup = Paragraph::new(text)
+        .block(Block::default().borders(Borders::ALL)
+            .title(" Go to Line (Enter确认, Esc取消) ")
+            .border_style(Style::default().fg(Color::Cyan)));
     frame.render_widget(popup, area);
 }

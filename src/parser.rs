@@ -18,7 +18,7 @@ fn extract_json_from_bytes(line_bytes: &[u8]) -> Option<Value> {
     serde_json::from_str(&String::from_utf8_lossy(&line_bytes[start + 1..end + 1])).ok()
 }
 
-pub fn parse_line(line: &str, line_bytes: &[u8], re: &Regex, source_id: usize) -> Option<LogEntry> {
+pub fn parse_line(line: &str, line_bytes: &[u8], re: &Regex, source_id: usize, line_index: usize) -> Option<LogEntry> {
     let caps = re.captures(line)?;
     Some(LogEntry {
         timestamp: caps.get(1)?.as_str().into(),
@@ -31,6 +31,7 @@ pub fn parse_line(line: &str, line_bytes: &[u8], re: &Regex, source_id: usize) -
         json_payload: extract_json_from_bytes(line_bytes),
         delta_ms: None,
         source_id,
+        line_index,
     })
 }
 

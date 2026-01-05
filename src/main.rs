@@ -85,8 +85,8 @@ fn load_logs(patterns: &[String]) -> Result<(Vec<models::DisplayEntry>, Vec<File
     for (id, path) in file_paths.iter().enumerate() {
         let file = File::open(path).with_context(|| format!("无法打开: {:?}", path))?;
         let mmap = unsafe { Mmap::map(&file)? };
-        let entries: Vec<models::LogEntry> = merge_multiline_bytes(&mmap).iter()
-            .filter_map(|b| parse_line(&decode_line(b), b, &re, id)).collect();
+        let entries: Vec<models::LogEntry> = merge_multiline_bytes(&mmap).iter().enumerate()
+            .filter_map(|(i, b)| parse_line(&decode_line(b), b, &re, id, i + 1)).collect();
         files.push(FileInfo {
             id,
             name: path.file_name().map(|s| s.to_string_lossy().into()).unwrap_or_else(|| "?".into()),

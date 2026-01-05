@@ -17,6 +17,14 @@ pub enum Focus {
     FileList,
 }
 
+#[derive(Default, Clone, Copy, PartialEq)]
+pub enum InputMode {
+    #[default]
+    Normal,
+    Editing,
+    JumpInput,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct LogEntry {
     pub timestamp: String,
@@ -29,6 +37,7 @@ pub struct LogEntry {
     pub json_payload: Option<Value>,
     pub delta_ms: Option<i64>,
     pub source_id: usize,
+    pub line_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +81,12 @@ impl DisplayEntry {
     pub fn get_source_id(&self) -> Option<usize> {
         match self {
             DisplayEntry::Normal(log) => Some(log.source_id),
+            _ => None,
+        }
+    }
+    pub fn get_line_index(&self) -> Option<usize> {
+        match self {
+            DisplayEntry::Normal(log) => Some(log.line_index),
             _ => None,
         }
     }
