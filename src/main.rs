@@ -1,5 +1,6 @@
 mod ai_client;
 mod app_state;
+mod config;
 mod live;
 mod logic;
 mod models;
@@ -10,7 +11,6 @@ use std::fs::File;
 use std::io::stdout;
 use std::path::PathBuf;
 use std::sync::mpsc as std_mpsc;
-use std::thread;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -23,10 +23,11 @@ use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
 use app_state::App;
+use config::AppConfig;
 use live::TailState;
 use logic::fold_noise;
 use models::FileInfo;
-use parser::{build_histogram, calculate_deltas, decode_line, log_regex, merge_multiline_bytes, parse_line};
+use parser::{build_histogram, calculate_deltas, decode_line, create_log_regex, merge_multiline_bytes, parse_line};
 use tui::run_app;
 
 #[derive(Parser)]
@@ -40,10 +41,13 @@ fn main() -> Result<()> {
     // 1. Parse CLI args
     let args = Args::parse();
 
-    // 2. Load and parse log files
-    let (entries, files, histogram, file_paths) = load_logs(&args.files)?;
+    // 2. Load config
+    let config = AppConfig::load()?;
 
-    // 3. Setup AI background task
+    // 3. Load and parse log files
+    let (entries, files, histogram, file_paths, re) = load_logs(&args.files, &config)?;
+
+    // 4. Setup AI background task
     let rt = tokio::runtime::Runtime::new()?;
     let (req_tx, mut req_rx) = mpsc::channel::<String>(1);
     let (resp_tx, resp_rx) = mpsc::channel::<Result<String, String>>(1);
@@ -54,10 +58,10 @@ fn main() -> Result<()> {
         }
     });
 
-    // 4. Initialize App state
+    // 5. Initialize App state
     let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx);
 
-    // 5. Setup file watcher for live tailing
+    // 6. Setup file watcher for live tailing
     let (file_tx, file_rx) = std_mpsc::channel();
     let watch_paths = file_paths.clone();
     let mut watcher = RecommendedWatcher::new(
@@ -82,15 +86,15 @@ fn main() -> Result<()> {
         }
     }
 
-    // 6. Setup terminal
+    // 7. Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // 7. Run event loop
-    let result = run_app(&mut terminal, &mut app, file_rx, &mut tail_state, &file_paths);
+    // 8. Run event loop
+    let result = run_app(&mut terminal, &mut app, file_rx, &mut tail_state, &file_paths, &re);
 
-    // 8. Restore terminal (always runs)
+    // 9. Restore terminal (always runs)
     drop(watcher);
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
@@ -98,9 +102,9 @@ fn main() -> Result<()> {
     result
 }
 
-fn load_logs(patterns: &[String]) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>, Vec<PathBuf>)> {
+fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>, Vec<PathBuf>, regex::Regex)> {
     let colors = [Color::Red, Color::Blue, Color::Green, Color::Yellow, Color::Cyan, Color::Magenta];
-    let re = log_regex();
+    let re = create_log_regex(&config.parser)?;
 
     let mut file_paths: Vec<PathBuf> = Vec::new();
     for pattern in patterns {
@@ -130,7 +134,7 @@ fn load_logs(patterns: &[String]) -> Result<(Vec<models::DisplayEntry>, Vec<File
     all_entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     calculate_deltas(&mut all_entries);
     let histogram = build_histogram(&all_entries);
-    let folded = fold_noise(all_entries);
+    let folded = fold_noise(all_entries, &config.filters);
 
-    Ok((folded, files, histogram, file_paths))
+    Ok((folded, files, histogram, file_paths, re))
 }

@@ -6,11 +6,11 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
+use regex::Regex;
 
 use crate::app_state::App;
 use crate::live::TailState;
 use crate::models::{AiState, DisplayEntry, Focus, InputMode};
-use crate::parser::log_regex;
 use super::components::{render_ai_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
 use super::layout::create_layout;
 
@@ -32,8 +32,8 @@ pub fn run_app(
     file_rx: Receiver<Vec<PathBuf>>,
     tail_state: &mut TailState,
     file_paths: &[PathBuf],
+    re: &Regex,
 ) -> Result<()> {
-    let re = log_regex();
     loop {
         if let Ok(result) = app.ai_rx.try_recv() {
             app.ai_state = match result {

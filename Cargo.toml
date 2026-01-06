@@ -19,4 +19,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 clap = { version = "4", features = ["derive"] }
 glob = "0.3"
 notify = "8"
+toml = "0.8"
 

@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use chrono::NaiveDateTime;
 use encoding_rs::GB18030;
 use regex::Regex;
 use regex::bytes::Regex as BytesRegex;
 use serde_json::Value;
 
+use crate::config::ParserConfig;
 use crate::models::LogEntry;
 
 pub fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
@@ -82,6 +84,7 @@ pub fn decode_line(bytes: &[u8]) -> String {
     decoded.into_owned()
 }
 
-pub fn log_regex() -> Regex {
-    Regex::new(r"^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d+)\[([0-9a-f]+):([0-9a-f]+)\]\[(\w+)\]:\s*(.*)\((.+):(\d+)\)\s*$").unwrap()
+pub fn create_log_regex(config: &ParserConfig) -> Result<Regex> {
+    Regex::new(&config.log_pattern).map_err(|e| anyhow::anyhow!("无效的日志正则表达式: {}", e))
 }
+

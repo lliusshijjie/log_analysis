@@ -1,0 +1,27 @@
+[parser]
+log_pattern = '^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d+)\[([0-9a-f]+):([0-9a-f]+)\]\[(\w+)\]:\s*(.*)\((.+):(\d+)\)\s*$'
+timestamp_format = "%Y-%m-%d %H:%M:%S%.3f"
+
+[filters]
+fold_threshold = 3
+ignore_patterns = []
+
+[[filters.fold_rules]]
+name = "USB polling"
+match_type = "source_file"
+patterns = [
+    "UsbCtrl",
+    "EnumDevice",
+]
+
+[[filters.fold_rules]]
+name = "thread cleanup"
+match_type = "content"
+patterns = [
+    "DestroyThread",
+    "Terminate",
+]
+
+[theme]
+slow_threshold_ms = 100
+very_slow_threshold_ms = 1000
