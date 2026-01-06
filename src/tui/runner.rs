@@ -1,4 +1,6 @@
 use std::io::Stdout;
+use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -6,7 +8,9 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
 
 use crate::app_state::App;
-use crate::models::{AiState, Focus, InputMode};
+use crate::live::TailState;
+use crate::models::{AiState, DisplayEntry, Focus, InputMode};
+use crate::parser::log_regex;
 use super::components::{render_ai_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
 use super::layout::create_layout;
 
@@ -22,13 +26,42 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_jump_popup(frame, app);
 }
 
-pub fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
+pub fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    file_rx: Receiver<Vec<PathBuf>>,
+    tail_state: &mut TailState,
+    file_paths: &[PathBuf],
+) -> Result<()> {
+    let re = log_regex();
     loop {
         if let Ok(result) = app.ai_rx.try_recv() {
             app.ai_state = match result {
                 Ok(s) => AiState::Completed(s),
                 Err(e) => AiState::Error(e),
             };
+        }
+
+        if app.is_tailing {
+            while let Ok(paths) = file_rx.try_recv() {
+                for changed_path in paths {
+                    if let Some((source_id, path)) = file_paths.iter().enumerate()
+                        .find(|(_, p)| p.as_path() == changed_path.as_path())
+                    {
+                        let base_idx = app.all_entries.len();
+                        let new_entries = tail_state.read_new_lines(path, source_id, &re, base_idx);
+                        for entry in new_entries {
+                            let display = DisplayEntry::Normal(entry);
+                            app.all_entries.push(display.clone());
+                            app.filtered_entries.push(display);
+                        }
+                    }
+                }
+            }
+            let len = app.filtered_entries.len();
+            if len > 0 {
+                app.list_state.select(Some(len - 1));
+            }
         }
 
         terminal.draw(|f| ui(f, app))?;
@@ -130,6 +163,7 @@ pub fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App)
                                     }
                                 }
                             }
+                            KeyCode::Char('f') => app.is_tailing = !app.is_tailing,
                             _ => {}
                         }
                     }

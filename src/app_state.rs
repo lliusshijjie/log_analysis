@@ -34,6 +34,7 @@ pub struct App {
     pub file_list_state: ListState,
     pub input_mode: InputMode,
     pub input_buffer: String,
+    pub is_tailing: bool,
 }
 
 impl App {
@@ -73,6 +74,7 @@ impl App {
             file_list_state,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
+            is_tailing: false,
         }
     }
 

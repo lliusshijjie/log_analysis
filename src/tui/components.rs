@@ -175,13 +175,16 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    let tail_indicator = if app.is_tailing { "[LIVE] " } else { "" };
     let title = match (&app.filter_tid, &app.search_regex) {
-        (Some(tid), Some(_)) => format!(" [FILTER: Thread {}] [SEARCH: {} matches] ", tid, app.match_indices.len()),
-        (Some(tid), None) => format!(" [FILTER: Thread {}] ", tid),
-        (None, Some(_)) => format!(" [SEARCH: {} matches] (n/N navigate) ", app.match_indices.len()),
-        (None, None) => format!(" Logs ({}) ", app.entries().len()),
+        (Some(tid), Some(_)) => format!(" {}[FILTER: Thread {}] [SEARCH: {} matches] ", tail_indicator, tid, app.match_indices.len()),
+        (Some(tid), None) => format!(" {}[FILTER: Thread {}] ", tail_indicator, tid),
+        (None, Some(_)) => format!(" {}[SEARCH: {} matches] (n/N navigate) ", tail_indicator, app.match_indices.len()),
+        (None, None) => format!(" {}Logs ({}) ", tail_indicator, app.entries().len()),
     };
-    let title_style = if app.filter_tid.is_some() || app.search_regex.is_some() {
+    let title_style = if app.is_tailing {
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else if app.filter_tid.is_some() || app.search_regex.is_some() {
         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
     } else {
         Style::default()

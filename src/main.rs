@@ -1,5 +1,6 @@
 mod ai_client;
 mod app_state;
+mod live;
 mod logic;
 mod models;
 mod parser;
@@ -8,6 +9,8 @@ mod tui;
 use std::fs::File;
 use std::io::stdout;
 use std::path::PathBuf;
+use std::sync::mpsc as std_mpsc;
+use std::thread;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -15,10 +18,12 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use crossterm::ExecutableCommand;
 use glob::glob;
 use memmap2::Mmap;
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
 use app_state::App;
+use live::TailState;
 use logic::fold_noise;
 use models::FileInfo;
 use parser::{build_histogram, calculate_deltas, decode_line, log_regex, merge_multiline_bytes, parse_line};
@@ -36,7 +41,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     // 2. Load and parse log files
-    let (entries, files, histogram) = load_logs(&args.files)?;
+    let (entries, files, histogram, file_paths) = load_logs(&args.files)?;
 
     // 3. Setup AI background task
     let rt = tokio::runtime::Runtime::new()?;
@@ -50,24 +55,50 @@ fn main() -> Result<()> {
     });
 
     // 4. Initialize App state
-    let mut app = App::new(entries, histogram, files, req_tx, resp_rx);
+    let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx);
 
-    // 5. Setup terminal
+    // 5. Setup file watcher for live tailing
+    let (file_tx, file_rx) = std_mpsc::channel();
+    let watch_paths = file_paths.clone();
+    let mut watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                if event.kind.is_modify() {
+                    let _ = file_tx.send(event.paths);
+                }
+            }
+        },
+        Config::default(),
+    )?;
+    for path in &watch_paths {
+        watcher.watch(path, RecursiveMode::NonRecursive)?;
+    }
+
+    // Initialize tail state with current file sizes
+    let mut tail_state = TailState::new();
+    for (id, path) in file_paths.iter().enumerate() {
+        if let Ok(meta) = std::fs::metadata(path) {
+            tail_state.init_offset(id, meta.len());
+        }
+    }
+
+    // 6. Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // 6. Run event loop
-    let result = run_app(&mut terminal, &mut app);
+    // 7. Run event loop
+    let result = run_app(&mut terminal, &mut app, file_rx, &mut tail_state, &file_paths);
 
-    // 7. Restore terminal (always runs)
+    // 8. Restore terminal (always runs)
+    drop(watcher);
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
 
     result
 }
 
-fn load_logs(patterns: &[String]) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>)> {
+fn load_logs(patterns: &[String]) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>, Vec<PathBuf>)> {
     let colors = [Color::Red, Color::Blue, Color::Green, Color::Yellow, Color::Cyan, Color::Magenta];
     let re = log_regex();
 
@@ -101,5 +132,5 @@ fn load_logs(patterns: &[String]) -> Result<(Vec<models::DisplayEntry>, Vec<File
     let histogram = build_histogram(&all_entries);
     let folded = fold_noise(all_entries);
 
-    Ok((folded, files, histogram))
+    Ok((folded, files, histogram, file_paths))
 }
