@@ -7,7 +7,7 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
-use crate::models::{AiState, DisplayEntry, FileInfo, Focus, InputMode, LevelVisibility};
+use crate::models::{AiState, CurrentView, DashboardStats, DisplayEntry, FileInfo, Focus, InputMode, LevelVisibility};
 
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
@@ -35,6 +35,8 @@ pub struct App {
     pub input_mode: InputMode,
     pub input_buffer: String,
     pub is_tailing: bool,
+    pub current_view: CurrentView,
+    pub stats: DashboardStats,
 }
 
 impl App {
@@ -75,6 +77,8 @@ impl App {
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
             is_tailing: false,
+            current_view: CurrentView::Logs,
+            stats: DashboardStats::default(),
         }
     }
 

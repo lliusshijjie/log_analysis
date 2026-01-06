@@ -114,3 +114,23 @@ impl Default for LevelVisibility {
         Self { info: true, warn: true, error: true, debug: true }
     }
 }
+
+#[derive(Default, Clone, Copy, PartialEq)]
+pub enum CurrentView {
+    #[default]
+    Logs,
+    Dashboard,
+}
+
+#[derive(Clone, Default)]
+pub struct DashboardStats {
+    pub total_logs: usize,
+    pub error_count: usize,
+    pub warn_count: usize,
+    pub info_count: usize,
+    pub log_duration: String,
+    pub error_trend: Vec<(String, u64)>,
+    pub top_sources: Vec<(String, u64)>,
+    pub top_threads: Vec<(String, u64)>,
+}
+

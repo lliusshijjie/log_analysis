@@ -1,4 +1,5 @@
 mod ai_client;
+mod analytics;
 mod app_state;
 mod config;
 mod live;
@@ -22,11 +23,12 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
+use analytics::compute_dashboard_stats;
 use app_state::App;
 use config::AppConfig;
 use live::TailState;
 use logic::fold_noise;
-use models::FileInfo;
+use models::{DashboardStats, FileInfo};
 use parser::{build_histogram, calculate_deltas, decode_line, create_log_regex, merge_multiline_bytes, parse_line};
 use tui::run_app;
 
@@ -45,7 +47,7 @@ fn main() -> Result<()> {
     let config = AppConfig::load()?;
 
     // 3. Load and parse log files
-    let (entries, files, histogram, file_paths, re) = load_logs(&args.files, &config)?;
+    let (entries, files, histogram, file_paths, re, stats) = load_logs(&args.files, &config)?;
 
     // 4. Setup AI background task
     let rt = tokio::runtime::Runtime::new()?;
@@ -60,6 +62,7 @@ fn main() -> Result<()> {
 
     // 5. Initialize App state
     let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx);
+    app.stats = stats;
 
     // 6. Setup file watcher for live tailing
     let (file_tx, file_rx) = std_mpsc::channel();
@@ -102,7 +105,7 @@ fn main() -> Result<()> {
     result
 }
 
-fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>, Vec<PathBuf>, regex::Regex)> {
+fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>, Vec<PathBuf>, regex::Regex, DashboardStats)> {
     let colors = [Color::Red, Color::Blue, Color::Green, Color::Yellow, Color::Cyan, Color::Magenta];
     let re = create_log_regex(&config.parser)?;
 
@@ -134,7 +137,8 @@ fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::Dis
     all_entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     calculate_deltas(&mut all_entries);
     let histogram = build_histogram(&all_entries);
+    let stats = compute_dashboard_stats(&all_entries);
     let folded = fold_noise(all_entries, &config.filters);
 
-    Ok((folded, files, histogram, file_paths, re))
+    Ok((folded, files, histogram, file_paths, re, stats))
 }

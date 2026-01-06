@@ -6,21 +6,37 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders};
 use regex::Regex;
 
 use crate::app_state::App;
 use crate::live::TailState;
-use crate::models::{AiState, DisplayEntry, Focus, InputMode};
+use crate::models::{AiState, CurrentView, DisplayEntry, Focus, InputMode};
 use super::components::{render_ai_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
+use super::dashboard::{render_dashboard, render_header};
 use super::layout::create_layout;
 
 fn ui(frame: &mut Frame, app: &mut App) {
-    let layout = create_layout(frame.area(), app.search_mode);
-    render_sidebar(frame, app, layout.sidebar);
-    render_log_list(frame, app, layout.log_list);
-    if app.search_mode { render_search_bar(frame, app, layout.search_bar); }
-    render_detail_pane(frame, app, layout.detail);
-    render_histogram(frame, app, layout.histogram);
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(frame.area());
+
+    render_header(frame, app, main_chunks[0]);
+
+    match app.current_view {
+        CurrentView::Logs => {
+            let layout = create_layout(main_chunks[1], app.search_mode);
+            render_sidebar(frame, app, layout.sidebar);
+            render_log_list(frame, app, layout.log_list);
+            if app.search_mode { render_search_bar(frame, app, layout.search_bar); }
+            render_detail_pane(frame, app, layout.detail);
+            render_histogram(frame, app, layout.histogram);
+        }
+        CurrentView::Dashboard => {
+            render_dashboard(frame, app, main_chunks[1]);
+        }
+    }
     render_ai_popup(frame, app);
     if app.show_help { render_help_popup(frame); }
     render_jump_popup(frame, app);
@@ -107,10 +123,13 @@ pub fn run_app(
                 {
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
+                        KeyCode::F(1) => app.current_view = CurrentView::Logs,
+                        KeyCode::F(2) => app.current_view = CurrentView::Dashboard,
                         KeyCode::Tab => app.focus = if app.focus == Focus::LogList { Focus::FileList } else { Focus::LogList },
                         KeyCode::Char('?') => app.show_help = true,
                         _ => {}
                     }
+                    if app.current_view == CurrentView::Dashboard { continue; }
                     match app.focus {
                         Focus::FileList => match key.code {
                             KeyCode::Up | KeyCode::Char('k') => {

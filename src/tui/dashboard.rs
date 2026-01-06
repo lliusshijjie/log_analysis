@@ -1,0 +1,146 @@
+use ratatui::{
+    prelude::*,
+    widgets::{Bar, BarChart, BarGroup, Block, Borders, List, ListItem, Paragraph},
+};
+
+use crate::app_state::App;
+use crate::models::CurrentView;
+
+pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
+    let logs_style = if app.current_view == CurrentView::Logs {
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let dash_style = if app.current_view == CurrentView::Dashboard {
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let spans = vec![
+        Span::styled(" [F1] ", logs_style),
+        Span::styled("Logs", logs_style),
+        Span::raw("  "),
+        Span::styled("[F2] ", dash_style),
+        Span::styled("Dashboard", dash_style),
+        Span::raw("  "),
+        Span::styled(
+            if app.is_tailing { "● LIVE" } else { "" },
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        ),
+    ];
+    let header = Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::BOTTOM));
+    frame.render_widget(header, area);
+}
+
+pub fn render_dashboard(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Min(10),
+            Constraint::Length(10),
+        ])
+        .split(area);
+
+    render_stats_cards(frame, app, chunks[0]);
+    render_error_trend(frame, app, chunks[1]);
+    render_top_lists(frame, app, chunks[2]);
+}
+
+fn render_stats_cards(frame: &mut Frame, app: &App, area: Rect) {
+    let stats = &app.stats;
+    let cards = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+        ])
+        .split(area);
+
+    let total = Paragraph::new(vec![
+        Line::from(Span::styled(format!("{}", stats.total_logs), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("Total Logs", Style::default().fg(Color::DarkGray))),
+    ])
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL).title(" 📊 Total "));
+    frame.render_widget(total, cards[0]);
+
+    let errors = Paragraph::new(vec![
+        Line::from(Span::styled(format!("{}", stats.error_count), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("Errors", Style::default().fg(Color::DarkGray))),
+    ])
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL).title(" ❌ Errors ").border_style(Style::default().fg(Color::Red)));
+    frame.render_widget(errors, cards[1]);
+
+    let warns = Paragraph::new(vec![
+        Line::from(Span::styled(format!("{}", stats.warn_count), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("Warnings", Style::default().fg(Color::DarkGray))),
+    ])
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL).title(" ⚠ Warnings ").border_style(Style::default().fg(Color::Yellow)));
+    frame.render_widget(warns, cards[2]);
+
+    let duration = Paragraph::new(vec![
+        Line::from(Span::styled(&stats.log_duration, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("Time Range", Style::default().fg(Color::DarkGray))),
+    ])
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL).title(" ⏱ Duration "));
+    frame.render_widget(duration, cards[3]);
+}
+
+fn render_error_trend(frame: &mut Frame, app: &App, area: Rect) {
+    let bars: Vec<Bar> = app.stats.error_trend.iter().map(|(label, val)| {
+        let display_label = label; // 显示完整的时间 (MM-DD HH:00)  
+        let val_str = format!("{}条", val);
+
+        Bar::default()
+            .value(*val)
+            .label(Line::from(display_label.to_string()).centered())
+            .text_value(val_str)
+            .style(Style::default().fg(Color::Red))
+    }).collect();
+
+    let chart = BarChart::default()
+        .block(Block::default().borders(Borders::ALL)
+            .title(" 📈 错误趋势 (按小时统计，柱状图高度=错误数量) "))
+        .data(BarGroup::default().bars(&bars))
+        .bar_width(12)
+        .bar_gap(5)
+        .value_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    frame.render_widget(chart, area);
+}
+
+fn render_top_lists(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    let source_items: Vec<ListItem> = app.stats.top_sources.iter().map(|(name, count)| {
+        let short_name = name.split('/').last().unwrap_or(name);
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("{:>5} ", count), Style::default().fg(Color::Cyan)),
+            Span::raw(short_name),
+        ]))
+    }).collect();
+    let sources = List::new(source_items)
+        .block(Block::default().borders(Borders::ALL).title(" 🔥 Top Sources "));
+    frame.render_widget(sources, chunks[0]);
+
+    let thread_items: Vec<ListItem> = app.stats.top_threads.iter().map(|(tid, count)| {
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("{:>5} ", count), Style::default().fg(Color::Magenta)),
+            Span::raw(tid),
+        ]))
+    }).collect();
+    let threads = List::new(thread_items)
+        .block(Block::default().borders(Borders::ALL).title(" 🧵 Active Threads "));
+    frame.render_widget(threads, chunks[1]);
+}
