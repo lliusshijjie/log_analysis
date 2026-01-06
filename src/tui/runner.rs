@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::ListState;
 use regex::Regex;
 
 use crate::app_state::App;

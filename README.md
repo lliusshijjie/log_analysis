@@ -74,7 +74,14 @@ cargo run -- file1.log file2.log file3.log
 程序首次运行时会在当前目录生成 `log_config.toml` 配置文件，支持自定义：
 - **log_pattern**: 日志解析正则表达式
 - **fold_rules**: 折叠规则（可配置匹配类型和模式）
-- **theme**: 慢日志阈值 (slow_threshold_ms, very_slow_threshold_ms)
+- **ignore_patterns**: 预解析过滤正则（匹配的日志行不会被加载）
+- **theme**: 慢日志阈值和语法高亮颜色 (ip_color, url_color, path_color)
+
+### 语法高亮
+日志内容会自动高亮显示：
+- **IP地址** (青色)
+- **URL链接** (蓝色)
+- **文件路径** (黄色)
 
 ## 7. 常见问题排查
 - **乱码问题**: 若在终端看到乱码，请确保使用 `Windows Terminal` 或将代码页设为 UTF-8 (`chcp 65001`)。

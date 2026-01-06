@@ -37,6 +37,9 @@ pub struct FoldRule {
 pub struct ThemeConfig {
     pub slow_threshold_ms: i64,
     pub very_slow_threshold_ms: i64,
+    pub ip_color: String,
+    pub url_color: String,
+    pub path_color: String,
 }
 
 impl Default for AppConfig {
@@ -84,6 +87,9 @@ impl Default for ThemeConfig {
         Self {
             slow_threshold_ms: 100,
             very_slow_threshold_ms: 1000,
+            ip_color: "Cyan".into(),
+            url_color: "Blue".into(),
+            path_color: "Yellow".into(),
         }
     }
 }

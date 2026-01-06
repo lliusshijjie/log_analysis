@@ -109,6 +109,10 @@ fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::Dis
     let colors = [Color::Red, Color::Blue, Color::Green, Color::Yellow, Color::Cyan, Color::Magenta];
     let re = create_log_regex(&config.parser)?;
 
+    let ignore_regexes: Vec<regex::Regex> = config.filters.ignore_patterns.iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+
     let mut file_paths: Vec<PathBuf> = Vec::new();
     for pattern in patterns {
         for entry in glob(pattern).with_context(|| format!("无效模式: {}", pattern))? {
@@ -124,7 +128,11 @@ fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::Dis
         let file = File::open(path).with_context(|| format!("无法打开: {:?}", path))?;
         let mmap = unsafe { Mmap::map(&file)? };
         let entries: Vec<models::LogEntry> = merge_multiline_bytes(&mmap).iter().enumerate()
-            .filter_map(|(i, b)| parse_line(&decode_line(b), b, &re, id, i + 1)).collect();
+            .filter_map(|(i, b)| {
+                let line = decode_line(b);
+                if ignore_regexes.iter().any(|ig| ig.is_match(&line)) { return None; }
+                parse_line(&line, b, &re, id, i + 1)
+            }).collect();
         files.push(FileInfo {
             id,
             name: path.file_name().map(|s| s.to_string_lossy().into()).unwrap_or_else(|| "?".into()),

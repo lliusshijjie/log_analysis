@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::app_state::App;
 use crate::models::{AiState, DisplayEntry, Focus, InputMode};
 use crate::tui::layout::centered_rect;
+use crate::tui::syntax::highlight_content_default;
 
 fn level_color(level: &str) -> Color {
     match level {
@@ -29,20 +30,7 @@ fn delta_span(delta_ms: Option<i64>) -> Option<Span<'static>> {
     }
 }
 
-fn highlight_text(text: &str, regex: Option<&Regex>, base_style: Style) -> Vec<Span<'static>> {
-    let Some(re) = regex else { return vec![Span::styled(text.to_string(), base_style)]; };
-    let mut spans = Vec::new();
-    let mut last = 0;
-    for m in re.find_iter(text) {
-        if m.start() > last { spans.push(Span::styled(text[last..m.start()].to_string(), base_style)); }
-        spans.push(Span::styled(m.as_str().to_string(), Style::default().bg(Color::Yellow).fg(Color::Black)));
-        last = m.end();
-    }
-    if last < text.len() { spans.push(Span::styled(text[last..].to_string(), base_style)); }
-    spans
-}
-
-fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool, is_bookmarked: bool, file_color: Color) -> ListItem<'static> {
+fn render_list_item(entry: &DisplayEntry, _regex: Option<&Regex>, is_match: bool, is_bookmarked: bool, file_color: Color) -> ListItem<'static> {
     let line_idx = entry.get_line_index().map(|n| format!("{:>5} ", n)).unwrap_or_else(|| "      ".into());
     let bookmark = if is_bookmarked { "🔖" } else { " " };
     let marker = if is_match { "●" } else { " " };
@@ -65,7 +53,11 @@ fn render_list_item(entry: &DisplayEntry, regex: Option<&Regex>, is_match: bool,
                 Span::styled(format!("[{:5}]", &log.level), Style::default().fg(level_color(&log.level))),
                 Span::raw(" "),
             ]);
-            spans.extend(highlight_text(&preview, regex, Style::default()));
+            let highlighted = highlight_content_default(&preview);
+            for span in highlighted.spans {
+                let owned_span = Span::styled(span.content.to_string(), span.style);
+                spans.push(owned_span);
+            }
             let style = if is_bookmarked { Style::default().bg(Color::Rgb(40, 40, 60)) } else { Style::default() };
             ListItem::new(Line::from(spans)).style(style)
         }

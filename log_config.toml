@@ -25,3 +25,6 @@ patterns = [
 [theme]
 slow_threshold_ms = 100
 very_slow_threshold_ms = 1000
+ip_color = "Cyan"
+url_color = "Blue"
+path_color = "Yellow"
