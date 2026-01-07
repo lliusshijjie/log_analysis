@@ -28,3 +28,4 @@ very_slow_threshold_ms = 1000
 ip_color = "Cyan"
 url_color = "Blue"
 path_color = "Yellow"
+page_size = 30

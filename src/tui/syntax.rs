@@ -58,12 +58,5 @@ pub fn highlight_content<'a>(content: &'a str, theme: &ThemeConfig) -> Line<'a> 
 }
 
 pub fn highlight_content_default(content: &str) -> Line<'_> {
-    let default_theme = ThemeConfig {
-        slow_threshold_ms: 100,
-        very_slow_threshold_ms: 1000,
-        ip_color: "Cyan".into(),
-        url_color: "Blue".into(),
-        path_color: "Yellow".into(),
-    };
-    highlight_content(content, &default_theme)
+    highlight_content(content, &ThemeConfig::default())
 }

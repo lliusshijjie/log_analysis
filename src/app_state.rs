@@ -37,6 +37,7 @@ pub struct App {
     pub is_tailing: bool,
     pub current_view: CurrentView,
     pub stats: DashboardStats,
+    pub page_size: usize,
 }
 
 impl App {
@@ -46,6 +47,7 @@ impl App {
         files: Vec<FileInfo>,
         ai_tx: mpsc::Sender<String>,
         ai_rx: mpsc::Receiver<Result<String, String>>,
+        page_size: usize,
     ) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() { list_state.select(Some(0)); }
@@ -79,6 +81,7 @@ impl App {
             is_tailing: false,
             current_view: CurrentView::Logs,
             stats: DashboardStats::default(),
+            page_size,
         }
     }
 
@@ -100,13 +103,13 @@ impl App {
     pub fn next_page(&mut self) {
         let len = self.filtered_entries.len();
         if len == 0 { return; }
-        let i = self.list_state.selected().map(|i| i.saturating_add(20).min(len - 1)).unwrap_or(0);
+        let i = self.list_state.selected().map(|i| i.saturating_add(self.page_size).min(len - 1)).unwrap_or(0);
         self.list_state.select(Some(i));
     }
 
     pub fn previous_page(&mut self) {
         if self.filtered_entries.is_empty() { return; }
-        let i = self.list_state.selected().map(|i| i.saturating_sub(20)).unwrap_or(0);
+        let i = self.list_state.selected().map(|i| i.saturating_sub(self.page_size)).unwrap_or(0);
         self.list_state.select(Some(i));
     }
 

@@ -61,7 +61,7 @@ fn main() -> Result<()> {
     });
 
     // 5. Initialize App state
-    let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx);
+    let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx, config.theme.page_size);
     app.stats = stats;
 
     // 6. Setup file watcher for live tailing

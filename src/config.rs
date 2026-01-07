@@ -40,7 +40,11 @@ pub struct ThemeConfig {
     pub ip_color: String,
     pub url_color: String,
     pub path_color: String,
+    #[serde(default = "default_page_size")]
+    pub page_size: usize,
 }
+
+fn default_page_size() -> usize { 20 }
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -90,6 +94,7 @@ impl Default for ThemeConfig {
             ip_color: "Cyan".into(),
             url_color: "Blue".into(),
             path_color: "Yellow".into(),
+            page_size: 20,
         }
     }
 }
