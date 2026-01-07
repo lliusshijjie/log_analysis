@@ -153,6 +153,8 @@ pub fn run_app(
                         Focus::LogList => match key.code {
                             KeyCode::Up | KeyCode::Char('k') => app.previous(),
                             KeyCode::Down | KeyCode::Char('j') => app.next(),
+                            KeyCode::Left => app.previous_page(),
+                            KeyCode::Right => app.next_page(),
                             KeyCode::Char('g') => app.jump_to_top(),
                             KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => app.jump_to_bottom(),
                             KeyCode::Char(':') => app.enter_jump_mode(),

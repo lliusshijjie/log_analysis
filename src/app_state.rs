@@ -97,6 +97,19 @@ impl App {
         self.list_state.select(Some(i));
     }
 
+    pub fn next_page(&mut self) {
+        let len = self.filtered_entries.len();
+        if len == 0 { return; }
+        let i = self.list_state.selected().map(|i| i.saturating_add(20).min(len - 1)).unwrap_or(0);
+        self.list_state.select(Some(i));
+    }
+
+    pub fn previous_page(&mut self) {
+        if self.filtered_entries.is_empty() { return; }
+        let i = self.list_state.selected().map(|i| i.saturating_sub(20)).unwrap_or(0);
+        self.list_state.select(Some(i));
+    }
+
     pub fn selected_entry(&self) -> Option<&DisplayEntry> {
         self.list_state.selected().and_then(|i| self.filtered_entries.get(i))
     }
