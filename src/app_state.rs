@@ -38,6 +38,7 @@ pub struct App {
     pub current_view: CurrentView,
     pub stats: DashboardStats,
     pub page_size: usize,
+    pub error_indices: Vec<usize>,
 }
 
 impl App {
@@ -53,6 +54,7 @@ impl App {
         if !entries.is_empty() { list_state.select(Some(0)); }
         let mut file_list_state = ListState::default();
         if !files.is_empty() { file_list_state.select(Some(0)); }
+        let error_indices = Self::compute_error_indices(&entries);
         Self {
             all_entries: entries.clone(),
             filtered_entries: entries,
@@ -82,7 +84,16 @@ impl App {
             current_view: CurrentView::Logs,
             stats: DashboardStats::default(),
             page_size,
+            error_indices,
         }
+    }
+
+    fn compute_error_indices(entries: &[DisplayEntry]) -> Vec<usize> {
+        entries.iter().enumerate()
+            .filter_map(|(i, e)| match e {
+                DisplayEntry::Normal(log) if log.level.to_lowercase().contains("error") => Some(i),
+                _ => None,
+            }).collect()
     }
 
     pub fn entries(&self) -> &Vec<DisplayEntry> { &self.filtered_entries }
@@ -149,6 +160,7 @@ impl App {
             .map(|(_, e)| e.clone()).collect();
         self.list_state.select(if self.filtered_entries.is_empty() { None } else { Some(0) });
         self.update_search_matches();
+        self.error_indices = Self::compute_error_indices(&self.filtered_entries);
     }
 
     pub fn start_search(&mut self) {

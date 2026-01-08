@@ -168,7 +168,7 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
 
 pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let tail_indicator = if app.is_tailing { "[LIVE] " } else { "" };
-    
+
     // Level filter status
     let level_status = format!("[{}I {}W {}E {}D]",
         if app.visible_levels.info { "●" } else { "○" },
@@ -176,7 +176,7 @@ pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
         if app.visible_levels.error { "●" } else { "○" },
         if app.visible_levels.debug { "●" } else { "○" },
     );
-    
+
     let title = match (&app.filter_tid, &app.search_regex) {
         (Some(tid), Some(_)) => format!(" {}[FILTER: Thread {}] [SEARCH: {} matches] {} ", tail_indicator, tid, app.match_indices.len(), level_status),
         (Some(tid), None) => format!(" {}[FILTER: Thread {}] {} ", tail_indicator, tid, level_status),
@@ -204,6 +204,47 @@ pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.list_state);
+
+    // Custom scrollbar with error markers
+    render_error_scrollbar(frame, app, area);
+}
+
+fn render_error_scrollbar(frame: &mut Frame, app: &App, area: Rect) {
+    let total = app.filtered_entries.len();
+    if total == 0 || area.height < 4 { return; }
+
+    let track_height = area.height.saturating_sub(2) as usize;
+    let scrollbar_x = area.x + area.width - 1;
+    let track_start_y = area.y + 1;
+
+    let visible_rows = track_height;
+    let selected = app.list_state.selected().unwrap_or(0);
+
+    // Calculate thumb position and size based on visible window
+    let thumb_size = ((visible_rows * track_height) / total.max(1)).max(1).min(track_height);
+    let max_scroll = total.saturating_sub(visible_rows);
+    let scroll_pos = selected.saturating_sub(visible_rows / 2).min(max_scroll);
+    let thumb_pos = if max_scroll == 0 { 0 } else { (scroll_pos * (track_height - thumb_size)) / max_scroll };
+
+    for y in 0..track_height {
+        let line_start = (y * total) / track_height;
+        let line_end = ((y + 1) * total) / track_height;
+
+        let has_error = app.error_indices.iter().any(|&i| i >= line_start && i < line_end);
+        let is_thumb = y >= thumb_pos && y < thumb_pos + thumb_size;
+
+        let (ch, style) = if is_thumb && has_error {
+            ("█", Style::default().fg(Color::Red))
+        } else if is_thumb {
+            ("█", Style::default().fg(Color::Cyan))
+        } else if has_error {
+            ("█", Style::default().fg(Color::Red))
+        } else {
+            ("│", Style::default().fg(Color::DarkGray))
+        };
+
+        frame.buffer_mut().set_string(scrollbar_x, track_start_y + y as u16, ch, style);
+    }
 }
 
 pub fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
