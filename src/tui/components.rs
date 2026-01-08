@@ -168,11 +168,20 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
 
 pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let tail_indicator = if app.is_tailing { "[LIVE] " } else { "" };
+    
+    // Level filter status
+    let level_status = format!("[{}I {}W {}E {}D]",
+        if app.visible_levels.info { "●" } else { "○" },
+        if app.visible_levels.warn { "●" } else { "○" },
+        if app.visible_levels.error { "●" } else { "○" },
+        if app.visible_levels.debug { "●" } else { "○" },
+    );
+    
     let title = match (&app.filter_tid, &app.search_regex) {
-        (Some(tid), Some(_)) => format!(" {}[FILTER: Thread {}] [SEARCH: {} matches] ", tail_indicator, tid, app.match_indices.len()),
-        (Some(tid), None) => format!(" {}[FILTER: Thread {}] ", tail_indicator, tid),
-        (None, Some(_)) => format!(" {}[SEARCH: {} matches] (n/N navigate) ", tail_indicator, app.match_indices.len()),
-        (None, None) => format!(" {}Logs ({}) ", tail_indicator, app.entries().len()),
+        (Some(tid), Some(_)) => format!(" {}[FILTER: Thread {}] [SEARCH: {} matches] {} ", tail_indicator, tid, app.match_indices.len(), level_status),
+        (Some(tid), None) => format!(" {}[FILTER: Thread {}] {} ", tail_indicator, tid, level_status),
+        (None, Some(_)) => format!(" {}[SEARCH: {} matches] {} ", tail_indicator, app.match_indices.len(), level_status),
+        (None, None) => format!(" {}Logs ({}) {} ", tail_indicator, app.entries().len(), level_status),
     };
     let title_style = if app.is_tailing {
         Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)

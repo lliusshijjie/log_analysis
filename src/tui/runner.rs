@@ -195,6 +195,7 @@ pub fn run_app(
                             KeyCode::Char('y') => app.yank_payload(),
                             KeyCode::Char('m') => app.toggle_bookmark(),
                             KeyCode::Char('b') => app.next_bookmark(),
+                            KeyCode::Char('B') if key.modifiers.contains(KeyModifiers::SHIFT) => app.prev_bookmark(),
                             KeyCode::Char('1') => app.toggle_level(1),
                             KeyCode::Char('2') => app.toggle_level(2),
                             KeyCode::Char('3') => app.toggle_level(3),

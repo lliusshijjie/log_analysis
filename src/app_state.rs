@@ -212,6 +212,14 @@ impl App {
         if let Some(&idx) = next { self.list_state.select(Some(idx)); }
     }
 
+    pub fn prev_bookmark(&mut self) {
+        if self.bookmarks.is_empty() { return; }
+        let current = self.list_state.selected().unwrap_or(0);
+        let prev = self.bookmarks.range(..current).next_back()
+            .or_else(|| self.bookmarks.iter().next_back());
+        if let Some(&idx) = prev { self.list_state.select(Some(idx)); }
+    }
+
     pub fn toggle_level(&mut self, level: u8) {
         match level {
             1 => self.visible_levels.info = !self.visible_levels.info,
