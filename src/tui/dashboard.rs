@@ -96,23 +96,37 @@ fn render_stats_cards(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_error_trend(frame: &mut Frame, app: &App, area: Rect) {
-    let bars: Vec<Bar> = app.stats.error_trend.iter().map(|(label, val)| {
-        let display_label = label; // 显示完整的时间 (MM-DD HH:00)  
-        let val_str = format!("{}条", val);
+    let full_data = &app.stats.error_trend;
+    let bar_width: usize = 12;
+    let bar_gap: usize = 5;
+    let available_width = area.width.saturating_sub(2) as usize; // exclude borders
+    let view_capacity = available_width / (bar_width + bar_gap);
 
+    // Sliding window calculation
+    let total_len = full_data.len();
+    let end_index = total_len.saturating_sub(app.chart_scroll);
+    let start_index = end_index.saturating_sub(view_capacity);
+    let visible_data = &full_data[start_index..end_index];
+
+    let bars: Vec<Bar> = visible_data.iter().map(|(label, val)| {
         Bar::default()
             .value(*val)
-            .label(Line::from(display_label.to_string()).centered())
-            .text_value(val_str)
+            .label(Line::from(label.to_string()).centered())
+            .text_value(format!("{}条", val))
             .style(Style::default().fg(Color::Red))
     }).collect();
 
+    let title = if app.chart_scroll == 0 {
+        format!(" 📈 错误趋势 (最新, {}/{}) ←/→滚动 ", visible_data.len(), total_len)
+    } else {
+        format!(" 📈 错误趋势 (历史 -{} 格, {}/{}) ←/→滚动 ", app.chart_scroll, visible_data.len(), total_len)
+    };
+
     let chart = BarChart::default()
-        .block(Block::default().borders(Borders::ALL)
-            .title(" 📈 错误趋势 (按小时统计，柱状图高度=错误数量) "))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .data(BarGroup::default().bars(&bars))
-        .bar_width(12)
-        .bar_gap(5)
+        .bar_width(bar_width as u16)
+        .bar_gap(bar_gap as u16)
         .value_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
     frame.render_widget(chart, area);
 }

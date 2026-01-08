@@ -157,7 +157,14 @@ pub fn run_app(
                         KeyCode::Char('?') => app.show_help = true,
                         _ => {}
                     }
-                    if app.current_view == CurrentView::Dashboard { continue; }
+                    if app.current_view == CurrentView::Dashboard {
+                        match key.code {
+                            KeyCode::Left => app.scroll_chart_left(app.stats.error_trend.len(), 10),
+                            KeyCode::Right => app.scroll_chart_right(),
+                            _ => {}
+                        }
+                        continue;
+                    }
                     match app.focus {
                         Focus::FileList => match key.code {
                             KeyCode::Up | KeyCode::Char('k') => {

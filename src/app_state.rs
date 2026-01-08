@@ -39,6 +39,7 @@ pub struct App {
     pub stats: DashboardStats,
     pub page_size: usize,
     pub error_indices: Vec<usize>,
+    pub chart_scroll: usize,
 }
 
 impl App {
@@ -85,6 +86,7 @@ impl App {
             stats: DashboardStats::default(),
             page_size,
             error_indices,
+            chart_scroll: 0,
         }
     }
 
@@ -122,6 +124,15 @@ impl App {
         if self.filtered_entries.is_empty() { return; }
         let i = self.list_state.selected().map(|i| i.saturating_sub(self.page_size)).unwrap_or(0);
         self.list_state.select(Some(i));
+    }
+
+    pub fn scroll_chart_left(&mut self, max_len: usize, view_width: usize) {
+        let max_scroll = max_len.saturating_sub(view_width);
+        self.chart_scroll = (self.chart_scroll + 1).min(max_scroll);
+    }
+
+    pub fn scroll_chart_right(&mut self) {
+        self.chart_scroll = self.chart_scroll.saturating_sub(1);
     }
 
     pub fn selected_entry(&self) -> Option<&DisplayEntry> {
