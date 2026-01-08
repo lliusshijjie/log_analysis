@@ -24,7 +24,7 @@ pub struct App {
     pub clipboard: Option<Clipboard>,
     pub histogram: Vec<(String, u64)>,
     pub ai_state: AiState,
-    pub ai_tx: mpsc::Sender<String>,
+    pub ai_tx: mpsc::Sender<(String, Option<String>)>,
     pub ai_rx: mpsc::Receiver<Result<String, String>>,
     pub bookmarks: BTreeSet<usize>,
     pub visible_levels: LevelVisibility,
@@ -45,7 +45,7 @@ impl App {
         entries: Vec<DisplayEntry>,
         histogram: Vec<(String, u64)>,
         files: Vec<FileInfo>,
-        ai_tx: mpsc::Sender<String>,
+        ai_tx: mpsc::Sender<(String, Option<String>)>,
         ai_rx: mpsc::Receiver<Result<String, String>>,
         page_size: usize,
     ) -> Self {
@@ -296,5 +296,15 @@ impl App {
     pub fn jump_to_bottom(&mut self) {
         let len = self.filtered_entries.len();
         if len > 0 { self.list_state.select(Some(len - 1)); }
+    }
+
+    pub fn enter_ai_prompt_mode(&mut self) {
+        self.input_mode = InputMode::AiPromptInput;
+        self.input_buffer.clear();
+    }
+
+    pub fn exit_ai_prompt_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.input_buffer.clear();
     }
 }

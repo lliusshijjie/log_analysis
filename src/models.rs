@@ -23,6 +23,7 @@ pub enum InputMode {
     Normal,
     Editing,
     JumpInput,
+    AiPromptInput,
 }
 
 #[derive(Debug, Serialize, Clone)]

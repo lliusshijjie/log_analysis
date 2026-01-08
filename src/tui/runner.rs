@@ -12,7 +12,7 @@ use regex::Regex;
 use crate::app_state::App;
 use crate::live::TailState;
 use crate::models::{AiState, CurrentView, DisplayEntry, Focus, InputMode};
-use super::components::{render_ai_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
+use super::components::{render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
 use super::dashboard::{render_dashboard, render_header};
 use super::layout::create_layout;
 
@@ -40,6 +40,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_ai_popup(frame, app);
     if app.show_help { render_help_popup(frame); }
     render_jump_popup(frame, app);
+    render_ai_prompt_popup(frame, app);
 }
 
 pub fn run_app(
@@ -96,6 +97,33 @@ pub fn run_app(
                         KeyCode::Enter => app.submit_jump(),
                         KeyCode::Backspace => { app.input_buffer.pop(); }
                         KeyCode::Char(c) if c.is_ascii_digit() => app.input_buffer.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if app.input_mode == InputMode::AiPromptInput {
+                    match key.code {
+                        KeyCode::Esc => app.exit_ai_prompt_mode(),
+                        KeyCode::Enter => {
+                            let custom_instruction = if app.input_buffer.trim().is_empty() {
+                                None
+                            } else {
+                                Some(app.input_buffer.clone())
+                            };
+                            if let Some(idx) = app.list_state.selected() {
+                                let start = idx.saturating_sub(10);
+                                let end = (idx + 11).min(app.filtered_entries.len());
+                                let context: String = app.filtered_entries[start..end].iter()
+                                    .map(|e| e.get_content()).collect::<Vec<_>>().join("\n");
+                                if app.ai_tx.blocking_send((context, custom_instruction)).is_ok() {
+                                    app.ai_state = AiState::Loading;
+                                }
+                            }
+                            app.exit_ai_prompt_mode();
+                        }
+                        KeyCode::Backspace => { app.input_buffer.pop(); }
+                        KeyCode::Char(c) => app.input_buffer.push(c),
                         _ => {}
                     }
                     continue;
@@ -173,15 +201,7 @@ pub fn run_app(
                             KeyCode::Char('4') => app.toggle_level(4),
                             KeyCode::Char('a') => {
                                 if matches!(app.ai_state, AiState::Idle) {
-                                    if let Some(idx) = app.list_state.selected() {
-                                        let start = idx.saturating_sub(10);
-                                        let end = (idx + 11).min(app.filtered_entries.len());
-                                        let context: String = app.filtered_entries[start..end].iter()
-                                            .map(|e| e.get_content()).collect::<Vec<_>>().join("\n");
-                                        if app.ai_tx.blocking_send(context).is_ok() {
-                                            app.ai_state = AiState::Loading;
-                                        }
-                                    }
+                                    app.enter_ai_prompt_mode();
                                 }
                             }
                             KeyCode::Char('f') => app.is_tailing = !app.is_tailing,

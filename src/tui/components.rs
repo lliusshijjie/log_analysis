@@ -326,3 +326,46 @@ pub fn render_jump_popup(frame: &mut Frame, app: &App) {
             .border_style(Style::default().fg(Color::Cyan)));
     frame.render_widget(popup, area);
 }
+
+pub fn render_ai_prompt_popup(frame: &mut Frame, app: &App) {
+    if app.input_mode != InputMode::AiPromptInput { return; }
+    
+    let area = frame.area();
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(5),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+    let area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+        ])
+        .split(popup_layout[1])[1];
+
+    frame.render_widget(Clear, area);
+    
+    let display_text = if app.input_buffer.is_empty() {
+        Line::from(vec![
+            Span::styled("默认：分析此错误的根本原因...", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+            Span::styled("█", Style::default().fg(Color::Gray)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(app.input_buffer.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("█", Style::default().fg(Color::Gray)),
+        ])
+    };
+    
+    let popup = Paragraph::new(display_text)
+        .block(Block::default().borders(Borders::ALL)
+            .title(" AI 诊断 (Enter=发送, Esc=取消) ")
+            .title_bottom(Line::from(" 留空使用默认提示词，或输入自定义指令 ").fg(Color::DarkGray))
+            .border_style(Style::default().fg(Color::Magenta)));
+    frame.render_widget(popup, area);
+}
