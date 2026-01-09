@@ -101,16 +101,23 @@ impl Default for ThemeConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        let path = Path::new(CONFIG_FILE);
+        Self::load_from(None)
+    }
+
+    pub fn load_from(custom_path: Option<&Path>) -> Result<Self> {
+        let path = custom_path.unwrap_or_else(|| Path::new(CONFIG_FILE));
         if path.exists() {
             let content = fs::read_to_string(path)?;
             let config: AppConfig = toml::from_str(&content)?;
             Ok(config)
-        } else {
+        } else if custom_path.is_none() {
+            // Only create default config if using default path
             let config = Self::default();
             let content = toml::to_string_pretty(&config)?;
             fs::write(path, content)?;
             Ok(config)
+        } else {
+            anyhow::bail!("配置文件不存在: {:?}", path)
         }
     }
 }

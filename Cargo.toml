@@ -3,6 +3,10 @@ name = "log_analysis"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "log"
+path = "src/main.rs"
+
 [dependencies]
 regex = "1"
 serde = { version = "1", features = ["derive"] }

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::mpsc as std_mpsc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
 use glob::glob;
@@ -33,21 +33,33 @@ use parser::{build_histogram, calculate_deltas, decode_line, create_log_regex, m
 use tui::run_app;
 
 #[derive(Parser)]
-#[command(name = "log_analysis", about = "TUI log analyzer")]
-struct Args {
-    #[arg(required = true)]
+#[command(name = "log", version, about = "TUI 日志分析器 - 支持多文件、实时追踪、AI 分析")]
+struct Cli {
+    /// 要分析的日志文件 (支持通配符，如 *.log)
+    #[arg(value_name = "FILE")]
     files: Vec<String>,
+
+    /// 配置文件路径
+    #[arg(short, long, value_name = "CONFIG")]
+    config: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     // 1. Parse CLI args
-    let args = Args::parse();
+    let cli = Cli::parse();
+    
+    if cli.files.is_empty() {
+        Cli::command().print_help()?;
+        println!("\n\n示例: log service.log");
+        println!("      log logs/*.log");
+        std::process::exit(0);
+    }
 
     // 2. Load config
-    let config = AppConfig::load()?;
+    let config = AppConfig::load_from(cli.config.as_deref())?;
 
     // 3. Load and parse log files
-    let (entries, files, histogram, file_paths, re, stats) = load_logs(&args.files, &config)?;
+    let (entries, files, histogram, file_paths, re, stats) = load_logs(&cli.files, &config)?;
 
     // 4. Setup AI background task
     let rt = tokio::runtime::Runtime::new()?;
