@@ -55,6 +55,15 @@ pub fn compute_dashboard_stats(logs: &[LogEntry]) -> DashboardStats {
         "N/A".into()
     };
 
+    // Calculate health score (50-100, never below 50)
+    let health_score = 100u16
+        .saturating_sub((error_count / 10) as u16)
+        .saturating_sub((warn_count / 50) as u16)
+        .max(50);
+
+    // Generate sparkline data from error trend
+    let sparkline_data: Vec<u64> = error_trend.iter().map(|(_, v)| *v).collect();
+
     DashboardStats {
         total_logs: logs.len(),
         error_count,
@@ -64,5 +73,7 @@ pub fn compute_dashboard_stats(logs: &[LogEntry]) -> DashboardStats {
         error_trend,
         top_sources,
         top_threads,
+        health_score,
+        sparkline_data,
     }
 }

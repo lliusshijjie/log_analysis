@@ -133,5 +133,7 @@ pub struct DashboardStats {
     pub error_trend: Vec<(String, u64)>,
     pub top_sources: Vec<(String, u64)>,
     pub top_threads: Vec<(String, u64)>,
+    pub health_score: u16,
+    pub sparkline_data: Vec<u64>,
 }
 
