@@ -6,12 +6,12 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui::widgets::ListState;
 use regex::Regex;
 
 use crate::app_state::App;
 use crate::live::TailState;
 use crate::models::{AiState, CurrentView, DisplayEntry, Focus, InputMode};
+use super::chat::render_chat_interface;
 use super::components::{render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar};
 use super::dashboard::{render_dashboard, render_header};
 use super::layout::create_layout;
@@ -36,6 +36,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
         CurrentView::Dashboard => {
             render_dashboard(frame, app, main_chunks[1]);
         }
+        CurrentView::Chat => {
+            render_chat_interface(frame, app, main_chunks[1]);
+        }
     }
     render_ai_popup(frame, app);
     if app.show_help { render_help_popup(frame); }
@@ -57,6 +60,18 @@ pub fn run_app(
                 Ok(s) => AiState::Completed(s),
                 Err(e) => AiState::Error(e),
             };
+        }
+        if let Ok(result) = app.chat_rx.try_recv() {
+            match result {
+                Ok(s) => app.receive_chat_response(s),
+                Err(e) => {
+                    app.receive_chat_response(format!("Error: {}", e));
+                    app.ai_state = AiState::Idle;
+                }
+            }
+        }
+        if matches!(app.ai_state, AiState::Loading) && app.current_view == CurrentView::Chat {
+            app.tick_spinner();
         }
 
         if app.is_tailing {
@@ -128,6 +143,17 @@ pub fn run_app(
                     }
                     continue;
                 }
+
+                if app.input_mode == InputMode::ChatInput {
+                    match key.code {
+                        KeyCode::Esc => app.input_mode = InputMode::Normal,
+                        KeyCode::Enter => app.submit_chat(),
+                        KeyCode::Backspace => { app.chat_input.pop(); }
+                        KeyCode::Char(c) => app.chat_input.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
                 
                 if app.search_mode {
                     match key.code {
@@ -153,6 +179,7 @@ pub fn run_app(
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::F(1) => app.current_view = CurrentView::Logs,
                         KeyCode::F(2) => app.current_view = CurrentView::Dashboard,
+                        KeyCode::F(3) => app.current_view = CurrentView::Chat,
                         KeyCode::Tab => app.focus = if app.focus == Focus::LogList { Focus::FileList } else { Focus::LogList },
                         KeyCode::Char('?') => app.show_help = true,
                         _ => {}
@@ -161,6 +188,19 @@ pub fn run_app(
                         match key.code {
                             KeyCode::Left => app.scroll_chart_left(app.stats.error_trend.len(), 10),
                             KeyCode::Right => app.scroll_chart_right(),
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    if app.current_view == CurrentView::Chat {
+                        match key.code {
+                            KeyCode::Char('i') => app.input_mode = InputMode::ChatInput,
+                            KeyCode::Char('c') => app.clear_chat_context(),
+                            KeyCode::Char('C') if key.modifiers.contains(KeyModifiers::SHIFT) => app.clear_chat_history(),
+                            KeyCode::Up | KeyCode::Char('k') => app.chat_scroll_up(),
+                            KeyCode::Down | KeyCode::Char('j') => app.chat_scroll_down(),
+                            KeyCode::Char('g') => { app.chat_scroll = 999; } // scroll to top
+                            KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => app.chat_scroll_to_bottom(),
                             _ => {}
                         }
                         continue;
@@ -212,6 +252,7 @@ pub fn run_app(
                                     app.enter_ai_prompt_mode();
                                 }
                             }
+                            KeyCode::Char('p') => app.pin_selected_log(),
                             KeyCode::Char('f') => app.is_tailing = !app.is_tailing,
                             _ => {}
                         }

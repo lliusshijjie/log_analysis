@@ -7,16 +7,16 @@ use crate::app_state::App;
 use crate::models::CurrentView;
 
 pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
-    let logs_style = if app.current_view == CurrentView::Logs {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
+    let tab_style = |active: bool| {
+        if active {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        }
     };
-    let dash_style = if app.current_view == CurrentView::Dashboard {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let logs_style = tab_style(app.current_view == CurrentView::Logs);
+    let dash_style = tab_style(app.current_view == CurrentView::Dashboard);
+    let chat_style = tab_style(app.current_view == CurrentView::Chat);
 
     let spans = vec![
         Span::styled(" [F1] ", logs_style),
@@ -24,6 +24,9 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw("  "),
         Span::styled("[F2] ", dash_style),
         Span::styled("Dashboard", dash_style),
+        Span::raw("  "),
+        Span::styled("[F3] ", chat_style),
+        Span::styled("Chat", chat_style),
         Span::raw("  "),
         Span::styled(
             if app.is_tailing { "● LIVE" } else { "" },

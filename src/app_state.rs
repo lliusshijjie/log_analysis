@@ -7,7 +7,7 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
-use crate::models::{AiState, CurrentView, DashboardStats, DisplayEntry, FileInfo, Focus, InputMode, LevelVisibility};
+use crate::models::{AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry, FileInfo, Focus, InputMode, LevelVisibility, LogEntry};
 
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
@@ -26,6 +26,8 @@ pub struct App {
     pub ai_state: AiState,
     pub ai_tx: mpsc::Sender<(String, Option<String>)>,
     pub ai_rx: mpsc::Receiver<Result<String, String>>,
+    pub chat_tx: mpsc::Sender<(Vec<ChatMessage>, Vec<LogEntry>)>,
+    pub chat_rx: mpsc::Receiver<Result<String, String>>,
     pub bookmarks: BTreeSet<usize>,
     pub visible_levels: LevelVisibility,
     pub show_help: bool,
@@ -40,6 +42,12 @@ pub struct App {
     pub page_size: usize,
     pub error_indices: Vec<usize>,
     pub chart_scroll: usize,
+    // Chat state
+    pub chat_history: Vec<ChatMessage>,
+    pub chat_context: ChatContext,
+    pub chat_input: String,
+    pub chat_scroll: usize,
+    pub chat_spinner: usize,
 }
 
 impl App {
@@ -49,6 +57,8 @@ impl App {
         files: Vec<FileInfo>,
         ai_tx: mpsc::Sender<(String, Option<String>)>,
         ai_rx: mpsc::Receiver<Result<String, String>>,
+        chat_tx: mpsc::Sender<(Vec<ChatMessage>, Vec<LogEntry>)>,
+        chat_rx: mpsc::Receiver<Result<String, String>>,
         page_size: usize,
     ) -> Self {
         let mut list_state = ListState::default();
@@ -73,6 +83,8 @@ impl App {
             ai_state: AiState::Idle,
             ai_tx,
             ai_rx,
+            chat_tx,
+            chat_rx,
             bookmarks: BTreeSet::new(),
             visible_levels: LevelVisibility::default(),
             show_help: false,
@@ -87,6 +99,11 @@ impl App {
             page_size,
             error_indices,
             chart_scroll: 0,
+            chat_history: Vec::new(),
+            chat_context: ChatContext::default(),
+            chat_input: String::new(),
+            chat_scroll: 0,
+            chat_spinner: 0,
         }
     }
 
@@ -337,5 +354,59 @@ impl App {
     pub fn exit_ai_prompt_mode(&mut self) {
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
+    }
+
+    // Chat methods
+    pub fn pin_selected_log(&mut self) {
+        if let Some(DisplayEntry::Normal(log)) = self.selected_entry().cloned() {
+            if !self.chat_context.pinned_logs.iter().any(|l| l.line_index == log.line_index && l.source_id == log.source_id) {
+                self.chat_context.pinned_logs.push(log);
+                self.status_msg = Some(("Pinned to chat".into(), Instant::now()));
+            }
+        }
+    }
+
+    pub fn clear_chat_context(&mut self) {
+        self.chat_context.pinned_logs.clear();
+        self.status_msg = Some(("Context cleared".into(), Instant::now()));
+    }
+
+    pub fn clear_chat_history(&mut self) {
+        self.chat_history.clear();
+        self.chat_scroll = 0;
+    }
+
+    pub fn submit_chat(&mut self) {
+        let msg = self.chat_input.trim();
+        if msg.is_empty() { return; }
+        self.chat_history.push(ChatMessage { role: ChatRole::User, content: msg.to_string() });
+        self.chat_input.clear();
+        let data = (self.chat_history.clone(), self.chat_context.pinned_logs.clone());
+        if self.chat_tx.blocking_send(data).is_ok() {
+            self.ai_state = AiState::Loading;
+        }
+        self.chat_scroll_to_bottom();
+    }
+
+    pub fn receive_chat_response(&mut self, response: String) {
+        self.chat_history.push(ChatMessage { role: ChatRole::Assistant, content: response });
+        self.ai_state = AiState::Idle;
+        self.chat_scroll_to_bottom();
+    }
+
+    pub fn chat_scroll_up(&mut self) {
+        self.chat_scroll = self.chat_scroll.saturating_add(1);
+    }
+
+    pub fn chat_scroll_down(&mut self) {
+        self.chat_scroll = self.chat_scroll.saturating_sub(1);
+    }
+
+    pub fn chat_scroll_to_bottom(&mut self) {
+        self.chat_scroll = 0;
+    }
+
+    pub fn tick_spinner(&mut self) {
+        self.chat_spinner = (self.chat_spinner + 1) % 10;
     }
 }

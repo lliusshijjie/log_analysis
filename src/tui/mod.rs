@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod components;
 pub mod dashboard;
 pub mod layout;

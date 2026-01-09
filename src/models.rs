@@ -24,6 +24,7 @@ pub enum InputMode {
     Editing,
     JumpInput,
     AiPromptInput,
+    ChatInput,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -121,6 +122,25 @@ pub enum CurrentView {
     #[default]
     Logs,
     Dashboard,
+    Chat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChatRole {
+    User,
+    Assistant,
+    System,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ChatContext {
+    pub pinned_logs: Vec<LogEntry>,
 }
 
 #[derive(Clone, Default)]

@@ -28,7 +28,7 @@ use app_state::App;
 use config::AppConfig;
 use live::TailState;
 use logic::fold_noise;
-use models::{DashboardStats, FileInfo};
+use models::{ChatMessage, DashboardStats, FileInfo, LogEntry};
 use parser::{build_histogram, calculate_deltas, decode_line, create_log_regex, merge_multiline_bytes, parse_line};
 use tui::run_app;
 
@@ -53,15 +53,26 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let (req_tx, mut req_rx) = mpsc::channel::<(String, Option<String>)>(1);
     let (resp_tx, resp_rx) = mpsc::channel::<Result<String, String>>(1);
+    let (chat_req_tx, mut chat_req_rx) = mpsc::channel::<(Vec<ChatMessage>, Vec<LogEntry>)>(1);
+    let (chat_resp_tx, chat_resp_rx) = mpsc::channel::<Result<String, String>>(1);
     rt.spawn(async move {
-        while let Some((context, custom_instruction)) = req_rx.recv().await {
-            let result = ai_client::analyze_error(context, custom_instruction).await.map_err(|e| e.to_string());
-            let _ = resp_tx.send(result).await;
+        loop {
+            tokio::select! {
+                Some((context, custom_instruction)) = req_rx.recv() => {
+                    let result = ai_client::analyze_error(context, custom_instruction).await.map_err(|e| e.to_string());
+                    let _ = resp_tx.send(result).await;
+                }
+                Some((history, logs)) = chat_req_rx.recv() => {
+                    let result = ai_client::send_chat_request(&history, &logs).await.map_err(|e| e.to_string());
+                    let _ = chat_resp_tx.send(result).await;
+                }
+                else => break,
+            }
         }
     });
 
     // 5. Initialize App state
-    let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx, config.theme.page_size);
+    let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx, chat_req_tx, chat_resp_rx, config.theme.page_size);
     app.stats = stats;
 
     // 6. Setup file watcher for live tailing
