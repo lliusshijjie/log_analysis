@@ -37,10 +37,15 @@ fn render_chat_history(frame: &mut Frame, app: &App, area: Rect) {
             ChatRole::Assistant => ("AI: ", Style::default().fg(Color::Green)),
             ChatRole::System => ("Sys: ", Style::default().fg(Color::DarkGray)),
         };
-        let lines: Vec<Line> = msg.content.lines()
+        let lines: Vec<Line> = msg
+            .content
+            .lines()
             .map(|l| Line::from(Span::styled(l.to_string(), style)))
             .collect();
-        items.push(ListItem::new(vec![Line::from(Span::styled(prefix, style.add_modifier(Modifier::BOLD)))]));
+        items.push(ListItem::new(vec![Line::from(Span::styled(
+            prefix,
+            style.add_modifier(Modifier::BOLD),
+        ))]));
         for line in lines {
             items.push(ListItem::new(line));
         }
@@ -51,8 +56,16 @@ fn render_chat_history(frame: &mut Frame, app: &App, area: Rect) {
     if matches!(app.ai_state, AiState::Loading) {
         let spinner = SPINNERS[app.chat_spinner];
         items.push(ListItem::new(Line::from(vec![
-            Span::styled("AI: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("思考中 {} ", spinner), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                "AI: ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("思考中 {} ", spinner),
+                Style::default().fg(Color::Yellow),
+            ),
         ])));
     }
 
@@ -60,7 +73,9 @@ fn render_chat_history(frame: &mut Frame, app: &App, area: Rect) {
     let total_lines = items.len();
     let scroll_offset = if total_lines > available_height {
         (total_lines - available_height).saturating_sub(app.chat_scroll)
-    } else { 0 };
+    } else {
+        0
+    };
 
     let visible_items: Vec<ListItem> = items.into_iter().skip(scroll_offset).collect();
 
@@ -76,9 +91,17 @@ fn render_chat_history(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_chat_input(frame: &mut Frame, app: &App, area: Rect) {
     let is_active = app.input_mode == InputMode::ChatInput;
-    let border_color = if is_active { Color::Yellow } else { Color::DarkGray };
-    
-    let hint = if is_active { " (Enter=发送, Esc=退出) " } else { " (i=输入, c=清空上下文, C=清空历史) " };
+    let border_color = if is_active {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+
+    let hint = if is_active {
+        " (Enter=发送, Esc=退出) "
+    } else {
+        " (i=输入, c=清空上下文, C=清空历史) "
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .title(hint)
@@ -92,13 +115,20 @@ fn render_chat_input(frame: &mut Frame, app: &App, area: Rect) {
         app.chat_input.clone()
     };
 
-    let style = if is_active { Style::default().fg(Color::White) } else { Style::default().fg(Color::DarkGray) };
+    let style = if is_active {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let para = Paragraph::new(display_text).style(style).block(block);
     frame.render_widget(para, area);
 }
 
 fn render_context_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = format!(" Context ({} logs) [p=pin, x=clear] ", app.chat_context.pinned_logs.len());
+    let title = format!(
+        " Context ({} logs) [p=pin, x=clear] ",
+        app.chat_context.pinned_logs.len()
+    );
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -124,10 +154,15 @@ fn render_context_panel(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!("#{} ", i + 1), Style::default().fg(Color::DarkGray)),
             Span::styled(format!("[{}][{}]", log.tid, log.level), level_style),
         ]));
-        lines.push(Line::from(Span::styled(log.content.clone(), Style::default().fg(Color::White))));
+        lines.push(Line::from(Span::styled(
+            log.content.clone(),
+            Style::default().fg(Color::White),
+        )));
         lines.push(Line::from(""));
     }
 
-    let para = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }

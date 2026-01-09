@@ -7,7 +7,10 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
-use crate::models::{AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry, FileInfo, Focus, InputMode, LevelVisibility, LogEntry};
+use crate::models::{
+    AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
+    FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
+};
 
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
@@ -62,9 +65,13 @@ impl App {
         page_size: usize,
     ) -> Self {
         let mut list_state = ListState::default();
-        if !entries.is_empty() { list_state.select(Some(0)); }
+        if !entries.is_empty() {
+            list_state.select(Some(0));
+        }
         let mut file_list_state = ListState::default();
-        if !files.is_empty() { file_list_state.select(Some(0)); }
+        if !files.is_empty() {
+            file_list_state.select(Some(0));
+        }
         let error_indices = Self::compute_error_indices(&entries);
         Self {
             all_entries: entries.clone(),
@@ -108,38 +115,67 @@ impl App {
     }
 
     fn compute_error_indices(entries: &[DisplayEntry]) -> Vec<usize> {
-        entries.iter().enumerate()
+        entries
+            .iter()
+            .enumerate()
             .filter_map(|(i, e)| match e {
                 DisplayEntry::Normal(log) if log.level.to_lowercase().contains("error") => Some(i),
                 _ => None,
-            }).collect()
+            })
+            .collect()
     }
 
-    pub fn entries(&self) -> &Vec<DisplayEntry> { &self.filtered_entries }
+    pub fn entries(&self) -> &Vec<DisplayEntry> {
+        &self.filtered_entries
+    }
 
     pub fn next(&mut self) {
         let len = self.filtered_entries.len();
-        if len == 0 { return; }
-        let i = self.list_state.selected().map(|i| (i + 1).min(len - 1)).unwrap_or(0);
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .list_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
         self.list_state.select(Some(i));
     }
 
     pub fn previous(&mut self) {
-        if self.filtered_entries.is_empty() { return; }
-        let i = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+        if self.filtered_entries.is_empty() {
+            return;
+        }
+        let i = self
+            .list_state
+            .selected()
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(0);
         self.list_state.select(Some(i));
     }
 
     pub fn next_page(&mut self) {
         let len = self.filtered_entries.len();
-        if len == 0 { return; }
-        let i = self.list_state.selected().map(|i| i.saturating_add(self.page_size).min(len - 1)).unwrap_or(0);
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .list_state
+            .selected()
+            .map(|i| i.saturating_add(self.page_size).min(len - 1))
+            .unwrap_or(0);
         self.list_state.select(Some(i));
     }
 
     pub fn previous_page(&mut self) {
-        if self.filtered_entries.is_empty() { return; }
-        let i = self.list_state.selected().map(|i| i.saturating_sub(self.page_size)).unwrap_or(0);
+        if self.filtered_entries.is_empty() {
+            return;
+        }
+        let i = self
+            .list_state
+            .selected()
+            .map(|i| i.saturating_sub(self.page_size))
+            .unwrap_or(0);
         self.list_state.select(Some(i));
     }
 
@@ -153,40 +189,71 @@ impl App {
     }
 
     pub fn selected_entry(&self) -> Option<&DisplayEntry> {
-        self.list_state.selected().and_then(|i| self.filtered_entries.get(i))
+        self.list_state
+            .selected()
+            .and_then(|i| self.filtered_entries.get(i))
     }
 
     pub fn toggle_thread_filter(&mut self) {
         if self.filter_tid.is_some() {
             self.filter_tid = None;
             self.apply_filter();
-        } else if let Some(tid) = self.selected_entry().and_then(|e| e.get_tid()).map(String::from) {
+        } else if let Some(tid) = self
+            .selected_entry()
+            .and_then(|e| e.get_tid())
+            .map(String::from)
+        {
             self.filter_tid = Some(tid);
             self.apply_filter();
         }
     }
 
     pub fn apply_filter(&mut self) {
-        let enabled_files: Vec<usize> = self.files.iter().filter(|f| f.enabled).map(|f| f.id).collect();
-        self.filtered_entries = self.all_entries.iter().enumerate()
+        let enabled_files: Vec<usize> = self
+            .files
+            .iter()
+            .filter(|f| f.enabled)
+            .map(|f| f.id)
+            .collect();
+        self.filtered_entries = self
+            .all_entries
+            .iter()
+            .enumerate()
             .filter(|(_, e)| {
                 if let Some(sid) = e.get_source_id() {
-                    if !enabled_files.contains(&sid) { return false; }
+                    if !enabled_files.contains(&sid) {
+                        return false;
+                    }
                 }
                 if let Some(tid) = &self.filter_tid {
-                    if e.get_tid() != Some(tid) { return false; }
+                    if e.get_tid() != Some(tid) {
+                        return false;
+                    }
                 }
                 if let DisplayEntry::Normal(log) = e {
                     let level = log.level.to_lowercase();
-                    if level.contains("info") && !self.visible_levels.info { return false; }
-                    if level.contains("warn") && !self.visible_levels.warn { return false; }
-                    if level.contains("error") && !self.visible_levels.error { return false; }
-                    if level.contains("debug") && !self.visible_levels.debug { return false; }
+                    if level.contains("info") && !self.visible_levels.info {
+                        return false;
+                    }
+                    if level.contains("warn") && !self.visible_levels.warn {
+                        return false;
+                    }
+                    if level.contains("error") && !self.visible_levels.error {
+                        return false;
+                    }
+                    if level.contains("debug") && !self.visible_levels.debug {
+                        return false;
+                    }
                 }
                 true
             })
-            .map(|(_, e)| e.clone()).collect();
-        self.list_state.select(if self.filtered_entries.is_empty() { None } else { Some(0) });
+            .map(|(_, e)| e.clone())
+            .collect();
+        self.list_state.select(if self.filtered_entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
         self.update_search_matches();
         self.error_indices = Self::compute_error_indices(&self.filtered_entries);
     }
@@ -197,13 +264,19 @@ impl App {
         self.negative_search = false;
     }
 
-    pub fn exit_search(&mut self) { self.search_mode = false; }
+    pub fn exit_search(&mut self) {
+        self.search_mode = false;
+    }
 
     pub fn update_search(&mut self) {
         if self.search_query.starts_with('!') {
             self.negative_search = true;
             let pattern = &self.search_query[1..];
-            self.search_regex = if pattern.is_empty() { None } else { Regex::new(pattern).ok() };
+            self.search_regex = if pattern.is_empty() {
+                None
+            } else {
+                Regex::new(pattern).ok()
+            };
         } else {
             self.negative_search = false;
             self.search_regex = Regex::new(&self.search_query).ok();
@@ -217,9 +290,13 @@ impl App {
             for (i, entry) in self.filtered_entries.iter().enumerate() {
                 let matches = re.is_match(&entry.get_searchable_text());
                 if self.negative_search {
-                    if !matches { self.match_indices.push(i); }
+                    if !matches {
+                        self.match_indices.push(i);
+                    }
                 } else {
-                    if matches { self.match_indices.push(i); }
+                    if matches {
+                        self.match_indices.push(i);
+                    }
                 }
             }
         }
@@ -227,37 +304,62 @@ impl App {
     }
 
     pub fn next_match(&mut self) {
-        if self.match_indices.is_empty() { return; }
+        if self.match_indices.is_empty() {
+            return;
+        }
         self.current_match = (self.current_match + 1) % self.match_indices.len();
-        self.list_state.select(Some(self.match_indices[self.current_match]));
+        self.list_state
+            .select(Some(self.match_indices[self.current_match]));
     }
 
     pub fn prev_match(&mut self) {
-        if self.match_indices.is_empty() { return; }
-        self.current_match = self.current_match.checked_sub(1).unwrap_or(self.match_indices.len() - 1);
-        self.list_state.select(Some(self.match_indices[self.current_match]));
+        if self.match_indices.is_empty() {
+            return;
+        }
+        self.current_match = self
+            .current_match
+            .checked_sub(1)
+            .unwrap_or(self.match_indices.len() - 1);
+        self.list_state
+            .select(Some(self.match_indices[self.current_match]));
     }
 
     pub fn toggle_bookmark(&mut self) {
         if let Some(idx) = self.list_state.selected() {
-            if !self.bookmarks.remove(&idx) { self.bookmarks.insert(idx); }
+            if !self.bookmarks.remove(&idx) {
+                self.bookmarks.insert(idx);
+            }
         }
     }
 
     pub fn next_bookmark(&mut self) {
-        if self.bookmarks.is_empty() { return; }
+        if self.bookmarks.is_empty() {
+            return;
+        }
         let current = self.list_state.selected().unwrap_or(0);
-        let next = self.bookmarks.range((current + 1)..).next()
+        let next = self
+            .bookmarks
+            .range((current + 1)..)
+            .next()
             .or_else(|| self.bookmarks.iter().next());
-        if let Some(&idx) = next { self.list_state.select(Some(idx)); }
+        if let Some(&idx) = next {
+            self.list_state.select(Some(idx));
+        }
     }
 
     pub fn prev_bookmark(&mut self) {
-        if self.bookmarks.is_empty() { return; }
+        if self.bookmarks.is_empty() {
+            return;
+        }
         let current = self.list_state.selected().unwrap_or(0);
-        let prev = self.bookmarks.range(..current).next_back()
+        let prev = self
+            .bookmarks
+            .range(..current)
+            .next_back()
             .or_else(|| self.bookmarks.iter().next_back());
-        if let Some(&idx) = prev { self.list_state.select(Some(idx)); }
+        if let Some(&idx) = prev {
+            self.list_state.select(Some(idx));
+        }
     }
 
     pub fn toggle_level(&mut self, level: u8) {
@@ -273,47 +375,72 @@ impl App {
 
     pub fn copy_line(&mut self) {
         let text = self.selected_entry().map(|entry| match entry {
-            DisplayEntry::Normal(log) => format!("{} [{}:{}][{}]: {} ({}:{})",
-                log.timestamp, log.pid, log.tid, log.level, log.content, log.source_file, log.line_num),
+            DisplayEntry::Normal(log) => format!(
+                "{} [{}:{}][{}]: {} ({}:{})",
+                log.timestamp,
+                log.pid,
+                log.tid,
+                log.level,
+                log.content,
+                log.source_file,
+                log.line_num
+            ),
             DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
         });
         if let (Some(clip), Some(text)) = (self.clipboard.as_mut(), text) {
-            if clip.set_text(text).is_ok() { self.status_msg = Some(("Copied!".into(), Instant::now())); }
+            if clip.set_text(text).is_ok() {
+                self.status_msg = Some(("Copied!".into(), Instant::now()));
+            }
         }
     }
 
     pub fn yank_payload(&mut self) {
         let text = self.selected_entry().map(|entry| match entry {
-            DisplayEntry::Normal(log) => log.json_payload.as_ref()
+            DisplayEntry::Normal(log) => log
+                .json_payload
+                .as_ref()
                 .map(|j| serde_json::to_string_pretty(j).unwrap_or_default())
                 .unwrap_or_else(|| log.content.clone()),
             DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
         });
         if let (Some(clip), Some(text)) = (self.clipboard.as_mut(), text) {
-            if clip.set_text(text).is_ok() { self.status_msg = Some(("Yanked!".into(), Instant::now())); }
+            if clip.set_text(text).is_ok() {
+                self.status_msg = Some(("Yanked!".into(), Instant::now()));
+            }
         }
     }
 
     pub fn status_message(&self) -> Option<&str> {
-        self.status_msg.as_ref().filter(|(_, t)| t.elapsed() < Duration::from_secs(2)).map(|(s, _)| s.as_str())
+        self.status_msg
+            .as_ref()
+            .filter(|(_, t)| t.elapsed() < Duration::from_secs(2))
+            .map(|(s, _)| s.as_str())
     }
 
     pub fn toggle_file(&mut self) {
         if let Some(idx) = self.file_list_state.selected() {
-            if let Some(f) = self.files.get_mut(idx) { f.enabled = !f.enabled; }
+            if let Some(f) = self.files.get_mut(idx) {
+                f.enabled = !f.enabled;
+            }
             self.apply_filter();
         }
     }
 
     pub fn solo_file(&mut self) {
         if let Some(idx) = self.file_list_state.selected() {
-            for (i, f) in self.files.iter_mut().enumerate() { f.enabled = i == idx; }
+            for (i, f) in self.files.iter_mut().enumerate() {
+                f.enabled = i == idx;
+            }
             self.apply_filter();
         }
     }
 
     pub fn get_file_color(&self, source_id: usize) -> Color {
-        self.files.iter().find(|f| f.id == source_id).map(|f| f.color).unwrap_or(Color::White)
+        self.files
+            .iter()
+            .find(|f| f.id == source_id)
+            .map(|f| f.color)
+            .unwrap_or(Color::White)
     }
 
     pub fn enter_jump_mode(&mut self) {
@@ -328,7 +455,11 @@ impl App {
 
     pub fn submit_jump(&mut self) {
         if let Ok(line_num) = self.input_buffer.parse::<usize>() {
-            if let Some(idx) = self.filtered_entries.iter().position(|e| e.get_line_index() == Some(line_num)) {
+            if let Some(idx) = self
+                .filtered_entries
+                .iter()
+                .position(|e| e.get_line_index() == Some(line_num))
+            {
                 self.list_state.select(Some(idx));
             } else {
                 self.status_msg = Some(("Line not found".into(), Instant::now()));
@@ -338,12 +469,16 @@ impl App {
     }
 
     pub fn jump_to_top(&mut self) {
-        if !self.filtered_entries.is_empty() { self.list_state.select(Some(0)); }
+        if !self.filtered_entries.is_empty() {
+            self.list_state.select(Some(0));
+        }
     }
 
     pub fn jump_to_bottom(&mut self) {
         let len = self.filtered_entries.len();
-        if len > 0 { self.list_state.select(Some(len - 1)); }
+        if len > 0 {
+            self.list_state.select(Some(len - 1));
+        }
     }
 
     pub fn enter_ai_prompt_mode(&mut self) {
@@ -359,7 +494,12 @@ impl App {
     // Chat methods
     pub fn pin_selected_log(&mut self) {
         if let Some(DisplayEntry::Normal(log)) = self.selected_entry().cloned() {
-            if !self.chat_context.pinned_logs.iter().any(|l| l.line_index == log.line_index && l.source_id == log.source_id) {
+            if !self
+                .chat_context
+                .pinned_logs
+                .iter()
+                .any(|l| l.line_index == log.line_index && l.source_id == log.source_id)
+            {
                 self.chat_context.pinned_logs.push(log);
                 self.status_msg = Some(("Pinned to chat".into(), Instant::now()));
             }
@@ -378,10 +518,18 @@ impl App {
 
     pub fn submit_chat(&mut self) {
         let msg = self.chat_input.trim();
-        if msg.is_empty() { return; }
-        self.chat_history.push(ChatMessage { role: ChatRole::User, content: msg.to_string() });
+        if msg.is_empty() {
+            return;
+        }
+        self.chat_history.push(ChatMessage {
+            role: ChatRole::User,
+            content: msg.to_string(),
+        });
         self.chat_input.clear();
-        let data = (self.chat_history.clone(), self.chat_context.pinned_logs.clone());
+        let data = (
+            self.chat_history.clone(),
+            self.chat_context.pinned_logs.clone(),
+        );
         if self.chat_tx.blocking_send(data).is_ok() {
             self.ai_state = AiState::Loading;
         }
@@ -389,7 +537,10 @@ impl App {
     }
 
     pub fn receive_chat_response(&mut self, response: String) {
-        self.chat_history.push(ChatMessage { role: ChatRole::Assistant, content: response });
+        self.chat_history.push(ChatMessage {
+            role: ChatRole::Assistant,
+            content: response,
+        });
         self.ai_state = AiState::Idle;
         self.chat_scroll_to_bottom();
     }

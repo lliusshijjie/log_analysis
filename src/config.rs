@@ -44,7 +44,9 @@ pub struct ThemeConfig {
     pub page_size: usize,
 }
 
-fn default_page_size() -> usize { 20 }
+fn default_page_size() -> usize {
+    20
+}
 
 impl Default for AppConfig {
     fn default() -> Self {

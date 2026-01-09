@@ -18,7 +18,9 @@ pub fn fold_noise(logs: Vec<LogEntry>, config: &FiltersConfig) -> Vec<DisplayEnt
             };
 
             let mut j = i;
-            while j < logs.len() && matches(&logs[j]) { j += 1; }
+            while j < logs.len() && matches(&logs[j]) {
+                j += 1;
+            }
             if j - i >= config.fold_threshold {
                 result.push(DisplayEntry::Folded {
                     start_index: i,
@@ -32,10 +34,14 @@ pub fn fold_noise(logs: Vec<LogEntry>, config: &FiltersConfig) -> Vec<DisplayEnt
             }
         }
 
-        if folded { continue; }
+        if folded {
+            continue;
+        }
 
         let mut j = i;
-        while j < logs.len() && logs[i].content == logs[j].content { j += 1; }
+        while j < logs.len() && logs[i].content == logs[j].content {
+            j += 1;
+        }
         if j - i >= 5 {
             result.push(DisplayEntry::Folded {
                 start_index: i,
@@ -52,4 +58,3 @@ pub fn fold_noise(logs: Vec<LogEntry>, config: &FiltersConfig) -> Vec<DisplayEnt
     }
     result
 }
-

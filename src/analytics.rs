@@ -19,7 +19,12 @@ pub fn compute_dashboard_stats(logs: &[LogEntry]) -> DashboardStats {
         if level.contains("error") {
             error_count += 1;
             let hour_key = if log.timestamp.len() >= 13 {
-                format!("{}-{} {}:00", &log.timestamp[5..7], &log.timestamp[8..10], &log.timestamp[11..13])
+                format!(
+                    "{}-{} {}:00",
+                    &log.timestamp[5..7],
+                    &log.timestamp[8..10],
+                    &log.timestamp[11..13]
+                )
             } else {
                 log.timestamp.clone()
             };
@@ -47,7 +52,10 @@ pub fn compute_dashboard_stats(logs: &[LogEntry]) -> DashboardStats {
     error_trend = error_trend.into_iter().rev().take(12).collect();
     error_trend.reverse();
 
-    let first_ts = &logs.first().map(|l| l.timestamp.clone()).unwrap_or_default();
+    let first_ts = &logs
+        .first()
+        .map(|l| l.timestamp.clone())
+        .unwrap_or_default();
     let last_ts = &logs.last().map(|l| l.timestamp.clone()).unwrap_or_default();
     let log_duration = if first_ts.len() >= 16 && last_ts.len() >= 16 {
         format!("{} ~ {}", &first_ts[11..16], &last_ts[11..16])

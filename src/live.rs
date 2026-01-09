@@ -14,7 +14,9 @@ pub struct TailState {
 
 impl TailState {
     pub fn new() -> Self {
-        Self { offsets: HashMap::new() }
+        Self {
+            offsets: HashMap::new(),
+        }
     }
 
     pub fn init_offset(&mut self, source_id: usize, offset: u64) {
@@ -28,8 +30,12 @@ impl TailState {
         re: &Regex,
         base_line_index: usize,
     ) -> Vec<LogEntry> {
-        let Ok(mut file) = File::open(path) else { return vec![]; };
-        let Ok(metadata) = file.metadata() else { return vec![]; };
+        let Ok(mut file) = File::open(path) else {
+            return vec![];
+        };
+        let Ok(metadata) = file.metadata() else {
+            return vec![];
+        };
         let file_size = metadata.len();
         let offset = self.offsets.get(&source_id).copied().unwrap_or(0);
 
@@ -54,8 +60,12 @@ impl TailState {
         self.offsets.insert(source_id, file_size);
 
         let lines = merge_multiline_bytes(&buffer);
-        lines.iter().enumerate()
-            .filter_map(|(i, b)| parse_line(&decode_line(b), b, re, source_id, base_line_index + i + 1))
+        lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| {
+                parse_line(&decode_line(b), b, re, source_id, base_line_index + i + 1)
+            })
             .collect()
     }
 }

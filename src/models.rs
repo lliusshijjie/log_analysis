@@ -75,7 +75,10 @@ impl DisplayEntry {
     pub fn get_content(&self) -> String {
         match self {
             DisplayEntry::Normal(log) => {
-                format!("{} [{}][{}]: {}", log.timestamp, log.tid, log.level, log.content)
+                format!(
+                    "{} [{}][{}]: {}",
+                    log.timestamp, log.tid, log.level, log.content
+                )
             }
             DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
         }
@@ -113,7 +116,12 @@ pub struct LevelVisibility {
 
 impl Default for LevelVisibility {
     fn default() -> Self {
-        Self { info: true, warn: true, error: true, debug: true }
+        Self {
+            info: true,
+            warn: true,
+            error: true,
+            debug: true,
+        }
     }
 }
 
@@ -156,4 +164,3 @@ pub struct DashboardStats {
     pub health_score: u16,
     pub sparkline_data: Vec<u64>,
 }
-

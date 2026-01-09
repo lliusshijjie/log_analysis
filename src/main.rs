@@ -15,7 +15,9 @@ use std::sync::mpsc as std_mpsc;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use crossterm::ExecutableCommand;
 use glob::glob;
 use memmap2::Mmap;
@@ -29,11 +31,18 @@ use config::AppConfig;
 use live::TailState;
 use logic::fold_noise;
 use models::{ChatMessage, DashboardStats, FileInfo, LogEntry};
-use parser::{build_histogram, calculate_deltas, decode_line, create_log_regex, merge_multiline_bytes, parse_line};
+use parser::{
+    build_histogram, calculate_deltas, create_log_regex, decode_line, merge_multiline_bytes,
+    parse_line,
+};
 use tui::run_app;
 
 #[derive(Parser)]
-#[command(name = "log", version, about = "TUI 日志分析器 - 支持多文件、实时追踪、AI 分析")]
+#[command(
+    name = "log",
+    version,
+    about = "TUI 日志分析器 - 支持多文件、实时追踪、AI 分析"
+)]
 struct Cli {
     /// 要分析的日志文件 (支持通配符，如 *.log)
     #[arg(value_name = "FILE")]
@@ -47,7 +56,7 @@ struct Cli {
 fn main() -> Result<()> {
     // 1. Parse CLI args
     let cli = Cli::parse();
-    
+
     if cli.files.is_empty() {
         Cli::command().print_help()?;
         println!("\n\n示例: log service.log");
@@ -84,7 +93,16 @@ fn main() -> Result<()> {
     });
 
     // 5. Initialize App state
-    let mut app = App::new(entries, histogram, files.clone(), req_tx, resp_rx, chat_req_tx, chat_resp_rx, config.theme.page_size);
+    let mut app = App::new(
+        entries,
+        histogram,
+        files.clone(),
+        req_tx,
+        resp_rx,
+        chat_req_tx,
+        chat_resp_rx,
+        config.theme.page_size,
+    );
     app.stats = stats;
 
     // 6. Setup file watcher for live tailing
@@ -118,7 +136,14 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     // 8. Run event loop
-    let result = run_app(&mut terminal, &mut app, file_rx, &mut tail_state, &file_paths, &re);
+    let result = run_app(
+        &mut terminal,
+        &mut app,
+        file_rx,
+        &mut tail_state,
+        &file_paths,
+        &re,
+    );
 
     // 9. Restore terminal (always runs)
     drop(watcher);
@@ -128,11 +153,31 @@ fn main() -> Result<()> {
     result
 }
 
-fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::DisplayEntry>, Vec<FileInfo>, Vec<(String, u64)>, Vec<PathBuf>, regex::Regex, DashboardStats)> {
-    let colors = [Color::Red, Color::Blue, Color::Green, Color::Yellow, Color::Cyan, Color::Magenta];
+fn load_logs(
+    patterns: &[String],
+    config: &AppConfig,
+) -> Result<(
+    Vec<models::DisplayEntry>,
+    Vec<FileInfo>,
+    Vec<(String, u64)>,
+    Vec<PathBuf>,
+    regex::Regex,
+    DashboardStats,
+)> {
+    let colors = [
+        Color::Red,
+        Color::Blue,
+        Color::Green,
+        Color::Yellow,
+        Color::Cyan,
+        Color::Magenta,
+    ];
     let re = create_log_regex(&config.parser)?;
 
-    let ignore_regexes: Vec<regex::Regex> = config.filters.ignore_patterns.iter()
+    let ignore_regexes: Vec<regex::Regex> = config
+        .filters
+        .ignore_patterns
+        .iter()
         .filter_map(|p| regex::Regex::new(p).ok())
         .collect();
 
@@ -142,7 +187,9 @@ fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::Dis
             file_paths.push(entry?);
         }
     }
-    if file_paths.is_empty() { anyhow::bail!("没有找到匹配的文件"); }
+    if file_paths.is_empty() {
+        anyhow::bail!("没有找到匹配的文件");
+    }
 
     let mut files: Vec<FileInfo> = Vec::new();
     let mut all_entries: Vec<models::LogEntry> = Vec::new();
@@ -150,15 +197,23 @@ fn load_logs(patterns: &[String], config: &AppConfig) -> Result<(Vec<models::Dis
     for (id, path) in file_paths.iter().enumerate() {
         let file = File::open(path).with_context(|| format!("无法打开: {:?}", path))?;
         let mmap = unsafe { Mmap::map(&file)? };
-        let entries: Vec<models::LogEntry> = merge_multiline_bytes(&mmap).iter().enumerate()
+        let entries: Vec<models::LogEntry> = merge_multiline_bytes(&mmap)
+            .iter()
+            .enumerate()
             .filter_map(|(i, b)| {
                 let line = decode_line(b);
-                if ignore_regexes.iter().any(|ig| ig.is_match(&line)) { return None; }
+                if ignore_regexes.iter().any(|ig| ig.is_match(&line)) {
+                    return None;
+                }
                 parse_line(&line, b, &re, id, i + 1)
-            }).collect();
+            })
+            .collect();
         files.push(FileInfo {
             id,
-            name: path.file_name().map(|s| s.to_string_lossy().into()).unwrap_or_else(|| "?".into()),
+            name: path
+                .file_name()
+                .map(|s| s.to_string_lossy().into())
+                .unwrap_or_else(|| "?".into()),
             color: colors[id % colors.len()],
             enabled: true,
         });

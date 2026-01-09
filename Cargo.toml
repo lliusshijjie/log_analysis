@@ -1,7 +1,13 @@
 [package]
-name = "log_analysis"
+name = "log-insight-tui"
 version = "0.1.0"
 edition = "2021"
+description = "A powerful TUI log analyzer with smart visualization, live tailing, and AI integration."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/lliusshijjie/log_analysis"
+keywords = ["tui", "log", "analysis", "visualization", "cli"]
+categories = ["command-line-utilities", "visualization", "development-tools::debugging"]
+readme = "README.md"
 
 [[bin]]
 name = "log"

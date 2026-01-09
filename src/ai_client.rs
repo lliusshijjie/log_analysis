@@ -34,25 +34,35 @@ struct OllamaResponseMessage {
 }
 
 fn format_logs_context(logs: &[LogEntry]) -> String {
-    if logs.is_empty() { return String::new(); }
+    if logs.is_empty() {
+        return String::new();
+    }
     let mut s = String::from("\n\n【已挂载的日志上下文】:\n");
     for log in logs {
-        s.push_str(&format!("[{}][{}][{}]: {} ({}:{})\n",
-            log.timestamp, log.tid, log.level, log.content, log.source_file, log.line_num));
+        s.push_str(&format!(
+            "[{}][{}][{}]: {} ({}:{})\n",
+            log.timestamp, log.tid, log.level, log.content, log.source_file, log.line_num
+        ));
     }
     s
 }
 
-pub async fn send_chat_request(history: &[ChatMessage], context_logs: &[LogEntry]) -> Result<String> {
+pub async fn send_chat_request(
+    history: &[ChatMessage],
+    context_logs: &[LogEntry],
+) -> Result<String> {
     let mut messages = Vec::new();
-    
+
     // System message with context
     let system_content = if context_logs.is_empty() {
         SYSTEM_PROMPT.to_string()
     } else {
         format!("{}{}", SYSTEM_PROMPT, format_logs_context(context_logs))
     };
-    messages.push(OllamaMessage { role: "system".into(), content: system_content });
+    messages.push(OllamaMessage {
+        role: "system".into(),
+        content: system_content,
+    });
 
     // Convert history
     for msg in history {
@@ -61,29 +71,44 @@ pub async fn send_chat_request(history: &[ChatMessage], context_logs: &[LogEntry
             ChatRole::Assistant => "assistant",
             ChatRole::System => "system",
         };
-        messages.push(OllamaMessage { role: role.into(), content: msg.content.clone() });
+        messages.push(OllamaMessage {
+            role: role.into(),
+            content: msg.content.clone(),
+        });
     }
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
-    
-    let resp = client.post(OLLAMA_CHAT_URL)
-        .json(&OllamaChatRequest { model: MODEL.into(), messages, stream: false })
-        .send().await?
-        .json::<OllamaChatResponse>().await?;
+
+    let resp = client
+        .post(OLLAMA_CHAT_URL)
+        .json(&OllamaChatRequest {
+            model: MODEL.into(),
+            messages,
+            stream: false,
+        })
+        .send()
+        .await?
+        .json::<OllamaChatResponse>()
+        .await?;
 
     Ok(resp.message.content)
 }
 
 // Keep legacy function for backward compatibility
-pub async fn analyze_error(log_context: String, custom_instruction: Option<String>) -> Result<String> {
+pub async fn analyze_error(
+    log_context: String,
+    custom_instruction: Option<String>,
+) -> Result<String> {
     let user_msg = custom_instruction
         .filter(|s| !s.trim().is_empty())
         .map(|inst| format!("{}\n\n日志内容:\n{}", inst, log_context))
         .unwrap_or_else(|| format!("请分析以下日志:\n{}", log_context));
-    
-    let history = vec![ChatMessage { role: ChatRole::User, content: user_msg }];
+
+    let history = vec![ChatMessage {
+        role: ChatRole::User,
+        content: user_msg,
+    }];
     send_chat_request(&history, &[]).await
 }
-
