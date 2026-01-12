@@ -2,6 +2,7 @@ mod ai_client;
 mod analytics;
 mod app_state;
 mod config;
+mod export;
 mod live;
 mod logic;
 mod models;
@@ -93,6 +94,7 @@ fn main() -> Result<()> {
     });
 
     // 5. Initialize App state
+    let (export_tx, export_rx) = std::sync::mpsc::channel();
     let mut app = App::new(
         entries,
         histogram,
@@ -101,6 +103,8 @@ fn main() -> Result<()> {
         resp_rx,
         chat_req_tx,
         chat_resp_rx,
+        export_rx,
+        export_tx,
         config.theme.page_size,
     );
     app.stats = stats;

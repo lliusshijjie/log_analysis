@@ -10,14 +10,17 @@ use regex::Regex;
 
 use super::chat::render_chat_interface;
 use super::components::{
-    render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_help_popup,
-    render_histogram, render_jump_popup, render_log_list, render_search_bar, render_sidebar,
+    render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_export_popup,
+    render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar,
+    render_sidebar,
 };
 use super::dashboard::{render_dashboard, render_header};
 use super::layout::create_layout;
 use crate::app_state::App;
 use crate::live::TailState;
-use crate::models::{AiState, CurrentView, DisplayEntry, Focus, InputMode};
+use crate::models::{
+    AiState, CurrentView, DisplayEntry, ExportResult, ExportState, ExportType, Focus, InputMode,
+};
 
 fn ui(frame: &mut Frame, app: &mut App) {
     let main_chunks = Layout::default()
@@ -51,6 +54,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     }
     render_jump_popup(frame, app);
     render_ai_prompt_popup(frame, app);
+    render_export_popup(frame, app);
 }
 
 pub fn run_app(
@@ -76,6 +80,12 @@ pub fn run_app(
                     app.ai_state = AiState::Idle;
                 }
             }
+        }
+        if let Ok(result) = app.export_rx.try_recv() {
+            app.export_state = match result {
+                ExportResult::Success(filename) => ExportState::Success(filename),
+                ExportResult::Error(e) => ExportState::Error(e),
+            };
         }
         if matches!(app.ai_state, AiState::Loading) && app.current_view == CurrentView::Chat {
             app.tick_spinner();
@@ -118,6 +128,23 @@ pub fn run_app(
                         app.ai_state = AiState::Idle;
                         continue;
                     }
+                }
+
+                if matches!(
+                    app.export_state,
+                    ExportState::Success(_) | ExportState::Error(_)
+                ) {
+                    app.export_state = ExportState::Idle;
+                    continue;
+                }
+
+                if matches!(app.export_state, ExportState::Confirm(_)) {
+                    match key.code {
+                        KeyCode::Enter => app.confirm_export(),
+                        KeyCode::Esc => app.cancel_export(),
+                        _ => {}
+                    }
+                    continue;
                 }
 
                 if app.input_mode == InputMode::JumpInput {
@@ -317,6 +344,14 @@ pub fn run_app(
                             }
                             KeyCode::Char('p') => app.pin_selected_log(),
                             KeyCode::Char('f') => app.is_tailing = !app.is_tailing,
+                            KeyCode::Char('e') => app.request_export(ExportType::LogsCsv),
+                            KeyCode::Char('E') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.request_export(ExportType::LogsJson)
+                            }
+                            KeyCode::Char('r') => app.request_export(ExportType::Report),
+                            KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.request_export(ExportType::AiAnalysis)
+                            }
                             _ => {}
                         },
                     }

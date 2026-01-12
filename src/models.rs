@@ -164,3 +164,26 @@ pub struct DashboardStats {
     pub health_score: u16,
     pub sparkline_data: Vec<u64>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportType {
+    LogsCsv,
+    LogsJson,
+    Report,
+    AiAnalysis,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportState {
+    Idle,
+    Confirm(ExportType),
+    Exporting(ExportType),
+    Success(String),
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum ExportResult {
+    Success(String),
+    Error(String),
+}

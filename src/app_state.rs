@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::mpsc as std_mpsc;
 use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
@@ -9,7 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
-    FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
+    ExportResult, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
 };
 
 pub struct App {
@@ -31,6 +32,8 @@ pub struct App {
     pub ai_rx: mpsc::Receiver<Result<String, String>>,
     pub chat_tx: mpsc::Sender<(Vec<ChatMessage>, Vec<LogEntry>)>,
     pub chat_rx: mpsc::Receiver<Result<String, String>>,
+    pub export_rx: std_mpsc::Receiver<ExportResult>,
+    pub export_tx: std_mpsc::Sender<ExportResult>,
     pub bookmarks: BTreeSet<usize>,
     pub visible_levels: LevelVisibility,
     pub show_help: bool,
@@ -51,6 +54,7 @@ pub struct App {
     pub chat_input: String,
     pub chat_scroll: usize,
     pub chat_spinner: usize,
+    pub export_state: ExportState,
 }
 
 impl App {
@@ -62,6 +66,8 @@ impl App {
         ai_rx: mpsc::Receiver<Result<String, String>>,
         chat_tx: mpsc::Sender<(Vec<ChatMessage>, Vec<LogEntry>)>,
         chat_rx: mpsc::Receiver<Result<String, String>>,
+        export_rx: std_mpsc::Receiver<ExportResult>,
+        export_tx: std_mpsc::Sender<ExportResult>,
         page_size: usize,
     ) -> Self {
         let mut list_state = ListState::default();
@@ -92,6 +98,8 @@ impl App {
             ai_rx,
             chat_tx,
             chat_rx,
+            export_rx,
+            export_tx,
             bookmarks: BTreeSet::new(),
             visible_levels: LevelVisibility::default(),
             show_help: false,
@@ -111,6 +119,7 @@ impl App {
             chat_input: String::new(),
             chat_scroll: 0,
             chat_spinner: 0,
+            export_state: ExportState::Idle,
         }
     }
 
@@ -559,5 +568,38 @@ impl App {
 
     pub fn tick_spinner(&mut self) {
         self.chat_spinner = (self.chat_spinner + 1) % 10;
+    }
+
+    pub fn request_export(&mut self, export_type: ExportType) {
+        self.export_state = ExportState::Confirm(export_type);
+    }
+
+    pub fn confirm_export(&mut self) {
+        if let ExportState::Confirm(export_type) = self.export_state.clone() {
+            self.export_state = ExportState::Exporting(export_type.clone());
+
+            let filtered_entries = self.filtered_entries.clone();
+            let stats = self.stats.clone();
+            let chat_history = self.chat_history.clone();
+            let export_type_clone = export_type.clone();
+            let tx = self.export_tx.clone();
+
+            std::thread::spawn(move || {
+                let result = match crate::export::perform_export(
+                    export_type_clone,
+                    &filtered_entries,
+                    &stats,
+                    &chat_history,
+                ) {
+                    Ok(filename) => ExportResult::Success(filename),
+                    Err(e) => ExportResult::Error(e.to_string()),
+                };
+                let _ = tx.send(result);
+            });
+        }
+    }
+
+    pub fn cancel_export(&mut self) {
+        self.export_state = ExportState::Idle;
     }
 }

@@ -6,7 +6,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::app_state::App;
-use crate::models::{AiState, DisplayEntry, Focus, InputMode};
+use crate::models::{AiState, DisplayEntry, ExportState, ExportType, Focus, InputMode};
 use crate::tui::layout::centered_rect;
 use crate::tui::syntax::highlight_content_default;
 
@@ -693,4 +693,137 @@ pub fn render_ai_prompt_popup(frame: &mut Frame, app: &App) {
             .border_style(Style::default().fg(Color::Magenta)),
     );
     frame.render_widget(popup, area);
+}
+
+pub fn render_export_popup(frame: &mut Frame, app: &App) {
+    match &app.export_state {
+        ExportState::Confirm(export_type) => {
+            let export_name = match export_type {
+                ExportType::LogsCsv => "日志 CSV",
+                ExportType::LogsJson => "日志 JSON",
+                ExportType::Report => "统计报告",
+                ExportType::AiAnalysis => "AI 分析结果",
+            };
+            let area = centered_rect(50, 10, frame.area());
+            frame.render_widget(Clear, area);
+            let content = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("确认导出: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        export_name,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        "Enter ",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("确认  ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        "Esc ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("取消", Style::default().fg(Color::White)),
+                ]),
+            ];
+            let popup = Paragraph::new(content).alignment(Alignment::Center).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" 导出确认 ")
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+            frame.render_widget(popup, area);
+        }
+        ExportState::Exporting(export_type) => {
+            let export_name = match export_type {
+                ExportType::LogsCsv => "日志 CSV",
+                ExportType::LogsJson => "日志 JSON",
+                ExportType::Report => "统计报告",
+                ExportType::AiAnalysis => "AI 分析结果",
+            };
+            let area = centered_rect(50, 8, frame.area());
+            frame.render_widget(Clear, area);
+            let content = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("正在导出: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        export_name,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from("⏳ 请稍候..."),
+            ];
+            let popup = Paragraph::new(content).alignment(Alignment::Center).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" 导出中 ")
+                    .border_style(Style::default().fg(Color::Yellow)),
+            );
+            frame.render_widget(popup, area);
+        }
+        ExportState::Success(filename) => {
+            let area = centered_rect(60, 8, frame.area());
+            frame.render_widget(Clear, area);
+            let content = vec![
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "✅ 导出成功!",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("文件: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(filename, Style::default().fg(Color::White)),
+                ]),
+                Line::from(""),
+                Line::from("按任意键关闭"),
+            ];
+            let popup = Paragraph::new(content).alignment(Alignment::Center).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" 成功 ")
+                    .border_style(Style::default().fg(Color::Green)),
+            );
+            frame.render_widget(popup, area);
+        }
+        ExportState::Error(err) => {
+            let area = centered_rect(60, 10, frame.area());
+            frame.render_widget(Clear, area);
+            let content = vec![
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "❌ 导出失败!",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("错误: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(err, Style::default().fg(Color::White)),
+                ]),
+                Line::from(""),
+                Line::from("按任意键关闭"),
+            ];
+            let popup = Paragraph::new(content).alignment(Alignment::Center).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" 错误 ")
+                    .border_style(Style::default().fg(Color::Red)),
+            );
+            frame.render_widget(popup, area);
+        }
+        ExportState::Idle => {}
+    }
 }
