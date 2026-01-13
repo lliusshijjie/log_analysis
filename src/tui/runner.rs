@@ -47,6 +47,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
         CurrentView::Chat => {
             render_chat_interface(frame, app, main_chunks[1]);
         }
+        CurrentView::History => {
+            super::history::render_history(frame, app, main_chunks[1]);
+        }
     }
     render_ai_popup(frame, app);
     if app.show_help {
@@ -150,7 +153,11 @@ pub fn run_app(
                 if app.input_mode == InputMode::JumpInput {
                     match key.code {
                         KeyCode::Esc => app.exit_jump_mode(),
-                        KeyCode::Enter => app.submit_jump(),
+                        KeyCode::Enter => {
+                            let line = app.input_buffer.clone();
+                            app.submit_jump();
+                            app.history.add(crate::history::CommandType::Jump, line);
+                        }
                         KeyCode::Backspace => {
                             app.input_buffer.pop();
                         }
@@ -179,12 +186,14 @@ pub fn run_app(
                                     .join("\n");
                                 if app
                                     .ai_tx
-                                    .blocking_send((context, custom_instruction))
+                                    .blocking_send((context, custom_instruction.clone()))
                                     .is_ok()
                                 {
                                     app.ai_state = AiState::Loading;
                                 }
                             }
+                            let prompt_text = custom_instruction.unwrap_or_else(|| "(默认分析)".to_string());
+                            app.history.add(crate::history::CommandType::AiPrompt, prompt_text);
                             app.exit_ai_prompt_mode();
                         }
                         KeyCode::Backspace => {
@@ -213,8 +222,10 @@ pub fn run_app(
                     match key.code {
                         KeyCode::Esc => app.exit_search(),
                         KeyCode::Enter => {
+                            let query = app.search_query.clone();
                             app.update_search();
                             app.exit_search();
+                            app.history.add(crate::history::CommandType::Search, query);
                         }
                         KeyCode::Backspace => {
                             app.search_query.pop();
@@ -241,6 +252,7 @@ pub fn run_app(
                         KeyCode::F(1) => app.current_view = CurrentView::Logs,
                         KeyCode::F(2) => app.current_view = CurrentView::Dashboard,
                         KeyCode::F(3) => app.current_view = CurrentView::Chat,
+                        KeyCode::F(4) => app.current_view = CurrentView::History,
                         KeyCode::Tab => {
                             app.focus = if app.focus == Focus::LogList {
                                 Focus::FileList
@@ -255,6 +267,25 @@ pub fn run_app(
                         match key.code {
                             KeyCode::Left => app.scroll_chart_left(app.stats.error_trend.len(), 10),
                             KeyCode::Right => app.scroll_chart_right(),
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    if app.current_view == CurrentView::History {
+                        match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => app.history.previous(),
+                            KeyCode::Down | KeyCode::Char('j') => app.history.next(),
+                            KeyCode::Enter => {
+                                if let Some(entry) = app.history.selected_entry().cloned() {
+                                    app.execute_history_entry(&entry);
+                                }
+                            }
+                            KeyCode::Delete | KeyCode::Char('d') => {
+                                let idx = app.history.selected;
+                                app.history.delete(idx);
+                            }
+                            KeyCode::Char('c') => app.history.clear(),
+                            KeyCode::Esc => app.current_view = CurrentView::Logs,
                             _ => {}
                         }
                         continue;

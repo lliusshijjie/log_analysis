@@ -8,6 +8,7 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
+use crate::history::HistoryManager;
 use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
     ExportResult, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
@@ -55,6 +56,7 @@ pub struct App {
     pub chat_scroll: usize,
     pub chat_spinner: usize,
     pub export_state: ExportState,
+    pub history: HistoryManager,
 }
 
 impl App {
@@ -120,6 +122,7 @@ impl App {
             chat_scroll: 0,
             chat_spinner: 0,
             export_state: ExportState::Idle,
+            history: HistoryManager::new(),
         }
     }
 
@@ -601,5 +604,31 @@ impl App {
 
     pub fn cancel_export(&mut self) {
         self.export_state = ExportState::Idle;
+    }
+
+    pub fn execute_history_entry(&mut self, entry: &crate::history::HistoryEntry) {
+        use crate::history::CommandType;
+        match entry.kind {
+            CommandType::Search => {
+                self.current_view = CurrentView::Logs;
+                self.search_query = entry.content.clone();
+                self.update_search();
+            }
+            CommandType::Jump => {
+                self.current_view = CurrentView::Logs;
+                if let Ok(line) = entry.content.parse::<u32>() {
+                    for (i, e) in self.filtered_entries.iter().enumerate() {
+                        if e.get_line_num() == Some(line) {
+                            self.list_state.select(Some(i));
+                            break;
+                        }
+                    }
+                }
+            }
+            CommandType::AiPrompt => {
+                self.current_view = CurrentView::Chat;
+                self.chat_input = entry.content.clone();
+            }
+        }
     }
 }

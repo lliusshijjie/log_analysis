@@ -3,6 +3,7 @@ mod analytics;
 mod app_state;
 mod config;
 mod export;
+mod history;
 mod live;
 mod logic;
 mod models;

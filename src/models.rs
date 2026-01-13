@@ -95,6 +95,12 @@ impl DisplayEntry {
             _ => None,
         }
     }
+    pub fn get_line_num(&self) -> Option<u32> {
+        match self {
+            DisplayEntry::Normal(log) => Some(log.line_num),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -131,6 +137,7 @@ pub enum CurrentView {
     Logs,
     Dashboard,
     Chat,
+    History,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
