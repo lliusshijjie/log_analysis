@@ -16,11 +16,18 @@ use super::components::{
 };
 use super::dashboard::{render_dashboard, render_header};
 use super::layout::create_layout;
+use super::search_modal::render_search_modal;
 use crate::app_state::App;
+use crate::filtering::filter_logs_owned;
 use crate::live::TailState;
 use crate::models::{
     AiState, CurrentView, DisplayEntry, ExportResult, ExportState, ExportType, Focus, InputMode,
 };
+use crate::search::{LogLevel, SearchCriteria};
+use crate::search_form::{FormField, TemplateMode};
+use crate::templates::{get_template, get_template_names, save_template};
+use crate::time_parser::parse_user_time;
+
 
 fn ui(frame: &mut Frame, app: &mut App) {
     let main_chunks = Layout::default()
@@ -58,6 +65,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_jump_popup(frame, app);
     render_ai_prompt_popup(frame, app);
     render_export_popup(frame, app);
+    render_search_modal(frame, app);
 }
 
 pub fn run_app(
@@ -246,6 +254,191 @@ pub fn run_app(
                     continue;
                 }
 
+                // Advanced search form modal handling
+                if app.search_form.is_open {
+                    // Handle template mode dialogs first
+                    match app.search_form.template_mode {
+                        TemplateMode::Saving => {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    app.search_form.exit_template_mode();
+                                }
+                                KeyCode::Enter => {
+                                    let name = app.search_form.template_name_input.trim();
+                                    if name.is_empty() {
+                                        app.search_form.set_error("模板名称不能为空".to_string());
+                                    } else {
+                                        let criteria = app.search_form.to_serializable_criteria();
+                                        match save_template(name, &criteria) {
+                                            Ok(()) => {
+                                                app.search_form.set_status(format!("模板 '{}' 保存成功", name));
+                                                app.search_form.exit_template_mode();
+                                            }
+                                            Err(e) => {
+                                                app.search_form.set_error(e);
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    app.search_form.template_name_input.pop();
+                                }
+                                KeyCode::Char(c) => {
+                                    app.search_form.template_name_input.push(c);
+                                }
+                                _ => {}
+                            }
+                            continue;
+                        }
+                        TemplateMode::Loading => {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    app.search_form.exit_template_mode();
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    app.search_form.prev_template();
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    app.search_form.next_template();
+                                }
+                                KeyCode::Enter => {
+                                    if let Some(name) = app.search_form.selected_template_name().cloned() {
+                                        if let Some(template) = get_template(&name) {
+                                            app.search_form.load_from_criteria(&template.criteria);
+                                            app.search_form.set_status(format!("已加载模板 '{}'", name));
+                                            app.search_form.exit_template_mode();
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            continue;
+                        }
+                        TemplateMode::None => {}
+                    }
+
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.search_form.close();
+                        }
+                        KeyCode::Tab => {
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                app.search_form.prev_field();
+                            } else {
+                                app.search_form.next_field();
+                            }
+                        }
+                        KeyCode::BackTab => {
+                            app.search_form.prev_field();
+                        }
+                        KeyCode::Enter => {
+                            if app.search_form.focused_field == FormField::SubmitBtn {
+                                // Build SearchCriteria from form
+                                let form = &app.search_form;
+                                let mut criteria = SearchCriteria::default();
+                                
+                                // Parse start time
+                                if !form.start_time_input.is_empty() {
+                                    match parse_user_time(&form.start_time_input) {
+                                        Some(t) => criteria.start_time = Some(t),
+                                        None => {
+                                            app.search_form.set_error(
+                                                format!("无效的开始时间: {}", form.start_time_input)
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                }
+                                
+                                // Parse end time
+                                if !form.end_time_input.is_empty() {
+                                    match parse_user_time(&form.end_time_input) {
+                                        Some(t) => criteria.end_time = Some(t),
+                                        None => {
+                                            app.search_form.set_error(
+                                                format!("无效的结束时间: {}", form.end_time_input)
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                }
+                                
+                                // Content regex
+                                if !form.content_input.is_empty() {
+                                    criteria.content_regex = Some(form.content_input.clone());
+                                }
+                                
+                                // Source file
+                                if !form.source_input.is_empty() {
+                                    criteria.source_file = Some(form.source_input.clone());
+                                }
+                                
+                                // Levels
+                                criteria.levels = form.selected_levels.iter().cloned().collect();
+                                
+                                // Apply filter
+                                app.filtered_entries = filter_logs_owned(&app.all_entries, &criteria);
+                                app.list_state.select(if app.filtered_entries.is_empty() {
+                                    None
+                                } else {
+                                    Some(0)
+                                });
+                                app.update_search_matches();
+                                
+                                // Close form and show status
+                                app.search_form.close();
+                                let count = app.filtered_entries.len();
+                                app.status_msg = Some((
+                                    format!("高级搜索: {} 条匹配", count),
+                                    std::time::Instant::now(),
+                                ));
+                            } else {
+                                // Move to next field on Enter in input fields
+                                app.search_form.next_field();
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(input) = app.search_form.current_input_mut() {
+                                input.pop();
+                            }
+                        }
+                        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            // Ctrl+S: Save template
+                            app.search_form.start_save_template();
+                        }
+                        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            // Ctrl+L: Load template
+                            let names = get_template_names();
+                            app.search_form.start_load_template(names);
+                        }
+                        KeyCode::Char(c) => {
+                            match app.search_form.focused_field {
+                                FormField::LevelSelect => {
+                                    // Toggle levels with 1-4
+                                    match c {
+                                        '1' => app.search_form.toggle_level(LogLevel::Debug),
+                                        '2' => app.search_form.toggle_level(LogLevel::Info),
+                                        '3' => app.search_form.toggle_level(LogLevel::Warn),
+                                        '4' => app.search_form.toggle_level(LogLevel::Error),
+                                        _ => {}
+                                    }
+                                }
+                                FormField::SubmitBtn => {
+                                    // No char input on submit button
+                                }
+                                _ => {
+                                    if let Some(input) = app.search_form.current_input_mut() {
+                                        input.push(c);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+
                 {
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
@@ -382,6 +575,9 @@ pub fn run_app(
                             KeyCode::Char('r') => app.request_export(ExportType::Report),
                             KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.request_export(ExportType::AiAnalysis)
+                            }
+                            KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.search_form.open();
                             }
                             _ => {}
                         },

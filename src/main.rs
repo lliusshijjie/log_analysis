@@ -3,11 +3,16 @@ mod analytics;
 mod app_state;
 mod config;
 mod export;
+mod filtering;
 mod history;
 mod live;
 mod logic;
 mod models;
 mod parser;
+mod search;
+mod search_form;
+mod templates;
+mod time_parser;
 mod tui;
 
 use std::fs::File;

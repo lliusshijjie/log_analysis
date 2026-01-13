@@ -13,6 +13,7 @@ use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
     ExportResult, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
 };
+use crate::search_form::SearchFormState;
 
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
@@ -57,6 +58,8 @@ pub struct App {
     pub chat_spinner: usize,
     pub export_state: ExportState,
     pub history: HistoryManager,
+    // Advanced search form state
+    pub search_form: SearchFormState,
 }
 
 impl App {
@@ -123,6 +126,7 @@ impl App {
             chat_spinner: 0,
             export_state: ExportState::Idle,
             history: HistoryManager::new(),
+            search_form: SearchFormState::new(),
         }
     }
 
