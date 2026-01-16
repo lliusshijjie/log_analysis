@@ -25,6 +25,7 @@ pub enum InputMode {
     JumpInput,
     AiPromptInput,
     ChatInput,
+    ReportSaveInput,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -138,6 +139,7 @@ pub enum CurrentView {
     Dashboard,
     Chat,
     History,
+    Report,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

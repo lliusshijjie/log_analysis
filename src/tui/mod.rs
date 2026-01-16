@@ -3,6 +3,7 @@ pub mod components;
 pub mod dashboard;
 pub mod history;
 pub mod layout;
+pub mod report;
 pub mod runner;
 pub mod search_modal;
 pub mod syntax;

@@ -112,3 +112,43 @@ pub async fn analyze_error(
     }];
     send_chat_request(&history, &[]).await
 }
+
+const REPORT_SYSTEM_PROMPT: &str = "你是一名 Site Reliability Engineer (SRE)。\
+根据提供的 JSON 格式日志统计数据生成技术报告。\
+报告结构：\
+1. **摘要**: 一句话描述系统健康状况。\
+2. **关键问题**: 列出主要错误及其潜在影响。\
+3. **趋势分析**: 分析错误模式和活跃模块。\
+4. **建议**: 可执行的下一步措施。\
+输出格式: Markdown，使用中文。";
+
+pub async fn generate_report(context_json: String) -> Result<String> {
+    let messages = vec![
+        OllamaMessage {
+            role: "system".into(),
+            content: REPORT_SYSTEM_PROMPT.into(),
+        },
+        OllamaMessage {
+            role: "user".into(),
+            content: format!("请根据以下统计数据生成报告:\n\n```json\n{}\n```", context_json),
+        },
+    ];
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()?;
+
+    let resp = client
+        .post(OLLAMA_CHAT_URL)
+        .json(&OllamaChatRequest {
+            model: MODEL.into(),
+            messages,
+            stream: false,
+        })
+        .send()
+        .await?
+        .json::<OllamaChatResponse>()
+        .await?;
+
+    Ok(resp.message.content)
+}
