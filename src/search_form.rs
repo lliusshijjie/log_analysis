@@ -45,6 +45,8 @@ impl FormField {
     }
 
     /// Get the display label for this field
+    /// Reserved for future use (e.g., accessibility or dynamic label rendering)
+    #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
             FormField::StartTime => "开始时间",
@@ -121,6 +123,8 @@ impl SearchFormState {
     }
 
     /// Clear all form inputs
+    /// Reserved for future use (e.g., "Clear Form" button)
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.start_time_input.clear();
         self.end_time_input.clear();
@@ -162,6 +166,8 @@ impl SearchFormState {
     }
 
     /// Check if any search criteria is set
+    /// Reserved for future use (e.g., enabling/disabling submit button)
+    #[allow(dead_code)]
     pub fn has_criteria(&self) -> bool {
         !self.start_time_input.is_empty()
             || !self.end_time_input.is_empty()
@@ -176,6 +182,8 @@ impl SearchFormState {
     }
 
     /// Clear the error message
+    /// Reserved for future use (e.g., auto-clear on field focus)
+    #[allow(dead_code)]
     pub fn clear_error(&mut self) {
         self.error_message = None;
     }

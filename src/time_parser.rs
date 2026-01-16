@@ -148,9 +148,12 @@ pub fn parse_log_timestamp(ts: &str) -> Option<DateTime<Local>> {
 }
 
 /// Result type for time parsing with error message
+/// Part of public API for external consumers
+#[allow(dead_code)]
 pub type TimeParseResult = Result<DateTime<Local>, String>;
 
 /// Parse user time with detailed error message
+#[allow(dead_code)] // Tested, part of public API
 pub fn parse_user_time_result(input: &str) -> TimeParseResult {
     parse_user_time(input).ok_or_else(|| {
         format!(

@@ -102,10 +102,6 @@ impl Default for ThemeConfig {
 }
 
 impl AppConfig {
-    pub fn load() -> Result<Self> {
-        Self::load_from(None)
-    }
-
     pub fn load_from(custom_path: Option<&Path>) -> Result<Self> {
         let path = custom_path.unwrap_or_else(|| Path::new(CONFIG_FILE));
         if path.exists() {

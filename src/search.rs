@@ -19,6 +19,8 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// Parse level from string (case-insensitive)
+    /// Reserved for future use (e.g., parsing level from config or CLI)
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "debug" => Some(LogLevel::Debug),
@@ -93,6 +95,7 @@ impl SearchTemplate {
 
 impl SearchCriteria {
     /// Create a new empty SearchCriteria
+    #[allow(dead_code)] // Used in tests
     pub fn new() -> Self {
         Self::default()
     }
@@ -114,30 +117,35 @@ impl SearchCriteria {
     }
 
     /// Builder method: set start time
+    #[allow(dead_code)] // Used in tests, part of public builder API
     pub fn with_start_time(mut self, time: DateTime<Local>) -> Self {
         self.start_time = Some(time);
         self
     }
 
     /// Builder method: set end time
+    #[allow(dead_code)] // Used in tests, part of public builder API
     pub fn with_end_time(mut self, time: DateTime<Local>) -> Self {
         self.end_time = Some(time);
         self
     }
 
     /// Builder method: set content regex
+    #[allow(dead_code)] // Used in tests, part of public builder API
     pub fn with_content_regex(mut self, pattern: &str) -> Self {
         self.content_regex = Some(pattern.to_string());
         self
     }
 
     /// Builder method: set source file filter
+    #[allow(dead_code)] // Used in tests, part of public builder API
     pub fn with_source_file(mut self, source: &str) -> Self {
         self.source_file = Some(source.to_string());
         self
     }
 
     /// Builder method: add a log level to filter
+    #[allow(dead_code)] // Used in tests, part of public builder API
     pub fn with_level(mut self, level: LogLevel) -> Self {
         if !self.levels.contains(&level) {
             self.levels.push(level);
@@ -146,6 +154,7 @@ impl SearchCriteria {
     }
 
     /// Builder method: set multiple log levels
+    #[allow(dead_code)] // Used in tests, part of public builder API
     pub fn with_levels(mut self, levels: Vec<LogLevel>) -> Self {
         self.levels = levels;
         self

@@ -219,6 +219,9 @@ fn load_logs(
 
     for (id, path) in file_paths.iter().enumerate() {
         let file = File::open(path).with_context(|| format!("无法打开: {:?}", path))?;
+        // SAFETY: The file handle `file` is kept open for the lifetime of `mmap`.
+        // The file is read-only during parsing, and we don't rely on the file contents
+        // remaining unchanged by external processes during this short parsing window.
         let mmap = unsafe { Mmap::map(&file)? };
         let entries: Vec<models::LogEntry> = merge_multiline_bytes(&mmap)
             .iter()

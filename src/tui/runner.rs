@@ -232,12 +232,14 @@ pub fn run_app(
                                     .map(|e| e.get_content())
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                if app
-                                    .ai_tx
-                                    .blocking_send((context, custom_instruction.clone()))
-                                    .is_ok()
-                                {
-                                    app.ai_state = AiState::Loading;
+                                // Use try_send to avoid blocking the UI thread
+                                match app.ai_tx.try_send((context, custom_instruction.clone())) {
+                                    Ok(()) => {
+                                        app.ai_state = AiState::Loading;
+                                    }
+                                    Err(_) => {
+                                        app.status_msg = Some(("AI 正忙，请稍后重试".into(), Instant::now()));
+                                    }
                                 }
                             }
                             let prompt_text = custom_instruction.unwrap_or_else(|| "(默认分析)".to_string());
@@ -546,8 +548,15 @@ pub fn run_app(
                                     }).collect();
                                     let context = crate::report::generate_report_context(&logs, app.report_period);
                                     if let Ok(json) = serde_json::to_string_pretty(&context) {
-                                        let _ = app.report_tx.blocking_send(json);
-                                        app.report_generating = true;
+                                        // Use try_send to avoid blocking the UI thread
+                                        match app.report_tx.try_send(json) {
+                                            Ok(()) => {
+                                                app.report_generating = true;
+                                            }
+                                            Err(_) => {
+                                                app.status_msg = Some(("报告生成器正忙，请稍后".into(), Instant::now()));
+                                            }
+                                        }
                                     }
                                 }
                             }

@@ -562,8 +562,17 @@ impl App {
             self.chat_history.clone(),
             self.chat_context.pinned_logs.clone(),
         );
-        if self.chat_tx.blocking_send(data).is_ok() {
-            self.ai_state = AiState::Loading;
+        // Use try_send to avoid blocking the UI thread
+        match self.chat_tx.try_send(data) {
+            Ok(()) => {
+                self.ai_state = AiState::Loading;
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                self.status_msg = Some(("AI 正忙，请稍后重试".into(), Instant::now()));
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                self.status_msg = Some(("AI 服务不可用".into(), Instant::now()));
+            }
         }
         self.chat_scroll_to_bottom();
     }

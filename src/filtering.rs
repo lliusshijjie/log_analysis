@@ -17,6 +17,8 @@ use regex::Regex;
 ///
 /// All active conditions must match (AND logic).
 /// Returns references to matching entries.
+/// Note: Use `filter_logs_owned` when storing the result; this is kept for potential future use.
+#[allow(dead_code)]
 pub fn filter_logs<'a>(
     entries: &'a [DisplayEntry],
     criteria: &SearchCriteria,
@@ -136,6 +138,8 @@ fn matches_log_entry(
 }
 
 /// Count entries matching criteria without allocating a result vector
+/// Reserved for future use (e.g., status bar display)
+#[allow(dead_code)]
 pub fn count_matching(entries: &[DisplayEntry], criteria: &SearchCriteria) -> usize {
     if criteria.is_empty() {
         return entries.len();

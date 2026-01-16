@@ -18,6 +18,7 @@ pub enum Focus {
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
+#[allow(dead_code)] // Editing variant reserved for inline edit mode
 pub enum InputMode {
     #[default]
     Normal,
@@ -67,6 +68,8 @@ impl DisplayEntry {
             DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
         }
     }
+    /// Reserved for future use (e.g., performance analysis display)
+    #[allow(dead_code)]
     pub fn get_delta_ms(&self) -> Option<i64> {
         match self {
             DisplayEntry::Normal(log) => log.delta_ms,
@@ -143,6 +146,7 @@ pub enum CurrentView {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)] // System variant used internally by AI client
 pub enum ChatRole {
     User,
     Assistant,

@@ -62,6 +62,8 @@ pub fn save_template(name: &str, criteria: &SerializableSearchCriteria) -> Resul
 }
 
 /// Delete a template by name
+/// Reserved for future use (e.g., template management UI)
+#[allow(dead_code)]
 pub fn delete_template(name: &str) -> Result<(), String> {
     let mut templates = load_templates();
     let original_len = templates.len();
