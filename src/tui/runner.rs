@@ -1,7 +1,7 @@
 use std::io::Stdout;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -57,6 +57,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
         CurrentView::History => {
             super::history::render_history(frame, app, main_chunks[1]);
         }
+        CurrentView::Report => {
+            super::report::render_report(frame, app, main_chunks[1]);
+        }
     }
     render_ai_popup(frame, app);
     if app.show_help {
@@ -97,6 +100,17 @@ pub fn run_app(
                 ExportResult::Success(filename) => ExportState::Success(filename),
                 ExportResult::Error(e) => ExportState::Error(e),
             };
+        }
+        // Poll report generation result
+        if let Ok(result) = app.report_rx.try_recv() {
+            app.report_generating = false;
+            match result {
+                Ok(content) => {
+                    app.report_content = content.clone();
+                    app.report_cache.set(app.report_period, content);
+                }
+                Err(e) => app.report_content = format!("生成报告失败: {}", e),
+            }
         }
         if matches!(app.ai_state, AiState::Loading) && app.current_view == CurrentView::Chat {
             app.tick_spinner();
@@ -153,6 +167,32 @@ pub fn run_app(
                     match key.code {
                         KeyCode::Enter => app.confirm_export(),
                         KeyCode::Esc => app.cancel_export(),
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if app.input_mode == InputMode::ReportSaveInput {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.input_buffer.clear();
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Enter => {
+                            let filename = app.input_buffer.clone();
+                            if !filename.is_empty() {
+                                match std::fs::write(&filename, &app.report_content) {
+                                    Ok(_) => app.status_msg = Some((format!("报告已保存到 {}", filename), Instant::now())),
+                                    Err(e) => app.status_msg = Some((format!("保存失败: {}", e), Instant::now())),
+                                }
+                            }
+                            app.input_buffer.clear();
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Backspace => {
+                            app.input_buffer.pop();
+                        }
+                        KeyCode::Char(c) => app.input_buffer.push(c),
                         _ => {}
                     }
                     continue;
@@ -446,6 +486,7 @@ pub fn run_app(
                         KeyCode::F(2) => app.current_view = CurrentView::Dashboard,
                         KeyCode::F(3) => app.current_view = CurrentView::Chat,
                         KeyCode::F(4) => app.current_view = CurrentView::History,
+                        KeyCode::F(5) => app.current_view = CurrentView::Report,
                         KeyCode::Tab => {
                             app.focus = if app.focus == Focus::LogList {
                                 Focus::FileList
@@ -478,6 +519,52 @@ pub fn run_app(
                                 app.history.delete(idx);
                             }
                             KeyCode::Char('c') => app.history.clear(),
+                            KeyCode::Esc => app.current_view = CurrentView::Logs,
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    if app.current_view == CurrentView::Report {
+                        match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.report_period = app.report_period.prev();
+                                app.report_content = app.report_cache.get(app.report_period).cloned().unwrap_or_default();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.report_period = app.report_period.next();
+                                app.report_content = app.report_cache.get(app.report_period).cloned().unwrap_or_default();
+                            }
+                            KeyCode::Enter => {
+                                if !app.report_generating {
+                                    // Generate report context and send to AI
+                                    let logs: Vec<_> = app.all_entries.iter().filter_map(|e| {
+                                        if let crate::models::DisplayEntry::Normal(log) = e {
+                                            Some(log.clone())
+                                        } else {
+                                            None
+                                        }
+                                    }).collect();
+                                    let context = crate::report::generate_report_context(&logs, app.report_period);
+                                    if let Ok(json) = serde_json::to_string_pretty(&context) {
+                                        let _ = app.report_tx.blocking_send(json);
+                                        app.report_generating = true;
+                                    }
+                                }
+                            }
+                            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if !app.report_content.is_empty() {
+                                    app.input_buffer = format!("report_{}.md", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                                    app.input_mode = InputMode::ReportSaveInput;
+                                }
+                            }
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if !app.report_content.is_empty() {
+                                    if let Some(ref mut clipboard) = app.clipboard {
+                                        let _ = clipboard.set_text(&app.report_content);
+                                        app.status_msg = Some(("报告已复制到剪贴板".into(), Instant::now()));
+                                    }
+                                }
+                            }
                             KeyCode::Esc => app.current_view = CurrentView::Logs,
                             _ => {}
                         }

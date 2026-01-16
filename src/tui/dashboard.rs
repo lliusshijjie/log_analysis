@@ -22,6 +22,7 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     let dash_style = tab_style(app.current_view == CurrentView::Dashboard);
     let chat_style = tab_style(app.current_view == CurrentView::Chat);
     let history_style = tab_style(app.current_view == CurrentView::History);
+    let report_style = tab_style(app.current_view == CurrentView::Report);
 
     let spans = vec![
         Span::styled(" [F1] ", logs_style),
@@ -35,6 +36,9 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw("  "),
         Span::styled("[F4] ", history_style),
         Span::styled("History", history_style),
+        Span::raw("  "),
+        Span::styled("[F5] ", report_style),
+        Span::styled("Report", report_style),
         Span::raw("  "),
         Span::styled(
             if app.is_tailing { "● LIVE" } else { "" },

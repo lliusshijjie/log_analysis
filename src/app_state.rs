@@ -13,6 +13,7 @@ use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
     ExportResult, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
 };
+use crate::report::{ReportCache, ReportPeriod};
 use crate::search_form::SearchFormState;
 
 pub struct App {
@@ -60,6 +61,13 @@ pub struct App {
     pub history: HistoryManager,
     // Advanced search form state
     pub search_form: SearchFormState,
+    // Report state
+    pub report_period: ReportPeriod,
+    pub report_content: String,
+    pub report_generating: bool,
+    pub report_tx: mpsc::Sender<String>,
+    pub report_rx: mpsc::Receiver<Result<String, String>>,
+    pub report_cache: ReportCache,
 }
 
 impl App {
@@ -73,6 +81,8 @@ impl App {
         chat_rx: mpsc::Receiver<Result<String, String>>,
         export_rx: std_mpsc::Receiver<ExportResult>,
         export_tx: std_mpsc::Sender<ExportResult>,
+        report_tx: mpsc::Sender<String>,
+        report_rx: mpsc::Receiver<Result<String, String>>,
         page_size: usize,
     ) -> Self {
         let mut list_state = ListState::default();
@@ -127,6 +137,12 @@ impl App {
             export_state: ExportState::Idle,
             history: HistoryManager::new(),
             search_form: SearchFormState::new(),
+            report_period: ReportPeriod::default(),
+            report_content: String::new(),
+            report_generating: false,
+            report_tx,
+            report_rx,
+            report_cache: ReportCache::load(),
         }
     }
 

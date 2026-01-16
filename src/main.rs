@@ -13,6 +13,7 @@ mod search;
 mod search_form;
 mod templates;
 mod time_parser;
+mod report;
 mod tui;
 
 use std::fs::File;
@@ -99,6 +100,16 @@ fn main() -> Result<()> {
         }
     });
 
+    // Report generation channels
+    let (report_req_tx, mut report_req_rx) = mpsc::channel::<String>(1);
+    let (report_resp_tx, report_resp_rx) = mpsc::channel::<Result<String, String>>(1);
+    rt.spawn(async move {
+        while let Some(context_json) = report_req_rx.recv().await {
+            let result = ai_client::generate_report(context_json).await.map_err(|e| e.to_string());
+            let _ = report_resp_tx.send(result).await;
+        }
+    });
+
     // 5. Initialize App state
     let (export_tx, export_rx) = std::sync::mpsc::channel();
     let mut app = App::new(
@@ -111,6 +122,8 @@ fn main() -> Result<()> {
         chat_resp_rx,
         export_rx,
         export_tx,
+        report_req_tx,
+        report_resp_rx,
         config.theme.page_size,
     );
     app.stats = stats;
