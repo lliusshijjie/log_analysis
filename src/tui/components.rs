@@ -572,20 +572,51 @@ pub fn render_ai_popup(frame: &mut Frame, app: &App) {
 }
 
 pub fn render_help_popup(frame: &mut Frame) {
-    let area = centered_rect(60, 50, frame.area());
+    let area = centered_rect(70, 75, frame.area());
     frame.render_widget(Clear, area);
     let help_text = "\
-Navigation:  ↑/↓ or k/j (Scroll), n/N (Next/Prev Match)
-             g (Top), G (Bottom), : (Go to Line)
-Search:      / (Find), !term (Exclude matching)
-Filters:     t (Thread Focus), 1/2/3/4 (Info/Warn/Err/Debug)
-Bookmarks:   m (Toggle Mark), b (Next Bookmark)
-Actions:     a (AI Analyze), c (Copy Line), y (Yank JSON)
-Quit:        q (Exit), Esc (Close popup)";
+━━━━━━━━━━━━━━━━━━━━ 视图切换 ━━━━━━━━━━━━━━━━━━━━
+F1 日志列表    F2 仪表盘    F3 AI聊天    F4 历史    F5 报告
+
+━━━━━━━━━━━━━━━━━━━━ 导航操作 ━━━━━━━━━━━━━━━━━━━━
+↑/↓ k/j     上下选择         ←/→        翻页
+g/G         顶部/底部         :          跳转到行号
+Tab         切换文件/日志焦点
+
+━━━━━━━━━━━━━━━━━━━━ 搜索过滤 ━━━━━━━━━━━━━━━━━━━━
+/           正则搜索          !term      反向搜索
+Shift+S     高级搜索面板       n/N        下/上一匹配
+t           线程过滤          1/2/3/4    Info/Warn/Error/Debug
+Ctrl+S      保存搜索模板 (面板内)
+Ctrl+L      加载搜索模板 (面板内)
+
+━━━━━━━━━━━━━━━━━━━━ 书签功能 ━━━━━━━━━━━━━━━━━━━━
+m           切换书签          b/B        下/上一书签
+
+━━━━━━━━━━━━━━━━━━━━ AI 聊天 ━━━━━━━━━━━━━━━━━━━━━
+a           AI 诊断选中日志    p          挂载日志到聊天
+i           进入聊天输入 (F3)  c          清空聊天上下文
+Shift+C     清空聊天历史 (F3)
+
+━━━━━━━━━━━━━━━━━━━━ 历史记录 (F4) ━━━━━━━━━━━━━━━
+Enter       重新执行          d/Delete   删除记录
+c           清空历史
+
+━━━━━━━━━━━━━━━━━━━━ 报告生成 (F5) ━━━━━━━━━━━━━━━
+↑/↓         选择周期          Enter      生成报告
+Ctrl+C      复制报告          Ctrl+S     保存为文件
+
+━━━━━━━━━━━━━━━━━━━━ 导出功能 ━━━━━━━━━━━━━━━━━━━━
+c/y         复制日志/JSON      e/E        导出CSV/JSON
+r/R         导出报告/AI分析
+
+━━━━━━━━━━━━━━━━━━━━ 其他功能 ━━━━━━━━━━━━━━━━━━━━
+f           实时追踪 (LIVE)    ?          显示帮助
+Esc         关闭/取消          q          退出程序";
     let popup = Paragraph::new(help_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" ❓ Help (Press ? or Esc to close) ")
+            .title(" ❓ 快捷键帮助 (按 ? 或 Esc 关闭) ")
             .title_style(
                 Style::default()
                     .fg(Color::Cyan)
