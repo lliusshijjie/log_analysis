@@ -40,6 +40,9 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("[F5] ", report_style),
         Span::styled("Report", report_style),
         Span::raw("  "),
+        Span::styled("[F6] ", if app.current_view == CurrentView::Focus { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+        Span::styled("Focus", if app.current_view == CurrentView::Focus { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+        Span::raw("  "),
         Span::styled(
             if app.is_tailing { "● LIVE" } else { "" },
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),

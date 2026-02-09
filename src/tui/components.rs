@@ -1,12 +1,12 @@
 use ratatui::{
     prelude::*,
-    widgets::{Bar, BarChart, BarGroup, Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Bar, BarChart, BarGroup, Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use regex::Regex;
 use serde_json::Value;
 
 use crate::app_state::App;
-use crate::models::{AiState, DisplayEntry, ExportState, ExportType, Focus, InputMode};
+use crate::models::{AiState, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility};
 use crate::tui::layout::centered_rect;
 use crate::tui::syntax::highlight_content_default;
 
@@ -271,100 +271,117 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(file_list, area, &mut app.file_list_state);
 }
 
-pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let tail_indicator = if app.is_tailing { "[LIVE] " } else { "" };
+/// Unified render function that accepts all state as parameters
+/// This avoids borrow checker issues when rendering from different contexts
+fn render_log_list_with_state(
+    frame: &mut Frame,
+    area: Rect,
+    entries: &[DisplayEntry],
+    selected: Option<usize>,
+    match_indices: &[usize],
+    bookmarks: &std::collections::BTreeSet<usize>,
+    error_indices: &[usize],
+    is_tailing: bool,
+    visible_levels: &LevelVisibility,
+    filter_tid: &Option<String>,
+    search_regex: &Option<Regex>,
+    focus: Focus,
+    search_mode: bool,
+    files: &[FileInfo],
+    is_focus_mode: bool,
+    focus_query: &str,
+) {
+    let tail_indicator = if is_tailing { "[LIVE] " } else { "" };
 
     // Level filter status
     let level_status = format!(
         "[{}I {}W {}E {}D]",
-        if app.visible_levels.info {
-            "●"
-        } else {
-            "○"
-        },
-        if app.visible_levels.warn {
-            "●"
-        } else {
-            "○"
-        },
-        if app.visible_levels.error {
-            "●"
-        } else {
-            "○"
-        },
-        if app.visible_levels.debug {
-            "●"
-        } else {
-            "○"
-        },
+        if visible_levels.info { "●" } else { "○" },
+        if visible_levels.warn { "●" } else { "○" },
+        if visible_levels.error { "●" } else { "○" },
+        if visible_levels.debug { "●" } else { "○" },
     );
 
-    let title = match (&app.filter_tid, &app.search_regex) {
-        (Some(tid), Some(_)) => format!(
-            " {}[FILTER: Thread {}] [SEARCH: {} matches] {} ",
-            tail_indicator,
-            tid,
-            app.match_indices.len(),
+    let (title, title_style, border_style, help) = if is_focus_mode {
+        let focus_title = format!(
+            " 🔍 FOCUS: {} ({} 条) {} [Esc退出]",
+            focus_query,
+            entries.len(),
             level_status
-        ),
-        (Some(tid), None) => format!(
-            " {}[FILTER: Thread {}] {} ",
-            tail_indicator, tid, level_status
-        ),
-        (None, Some(_)) => format!(
-            " {}[SEARCH: {} matches] {} ",
-            tail_indicator,
-            app.match_indices.len(),
-            level_status
-        ),
-        (None, None) => format!(
-            " {}Logs ({}) {} ",
-            tail_indicator,
-            app.entries().len(),
-            level_status
-        ),
-    };
-    let title_style = if app.is_tailing {
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else if app.filter_tid.is_some() || app.search_regex.is_some() {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        );
+        (
+            focus_title,
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Cyan),
+            "e=导出 c=复制 Esc=退出",
+        )
     } else {
-        Style::default()
+        let title = match (filter_tid, search_regex) {
+            (Some(tid), Some(_)) => format!(
+                " {}[FILTER: Thread {}] [SEARCH: {} matches] {} ",
+                tail_indicator, tid, match_indices.len(), level_status
+            ),
+            (Some(tid), None) => format!(
+                " {}[FILTER: Thread {}] {} ",
+                tail_indicator, tid, level_status
+            ),
+            (None, Some(_)) => format!(
+                " {}[SEARCH: {} matches] {} ",
+                tail_indicator, match_indices.len(), level_status
+            ),
+            (None, None) => format!(
+                " {}Logs ({}) {} ",
+                tail_indicator, entries.len(), level_status
+            ),
+        };
+        let title_style = if is_tailing {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else if filter_tid.is_some() || search_regex.is_some() {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let list_style = if focus == Focus::LogList {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+        let help = if search_mode {
+            "ESC=exit  Alt+Enter=Focus模式"
+        } else {
+            "Tab=switch Space=toggle Enter=solo Alt+Enter=Focus模式"
+        };
+        (title, title_style, list_style, help)
     };
 
-    let entries = app.entries().clone();
+    // Helper to get file color
+    let get_file_color = |source_id: usize| -> Color {
+        files.iter()
+            .find(|f| f.id == source_id)
+            .map(|f| f.color)
+            .unwrap_or(Color::White)
+    };
+
     let items: Vec<ListItem> = entries
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let file_color = e
-                .get_source_id()
-                .map(|sid| app.get_file_color(sid))
+            let file_color = e.get_source_id()
+                .map(|sid| get_file_color(sid))
                 .unwrap_or(Color::White);
             render_list_item(
                 e,
-                app.search_regex.as_ref(),
-                app.match_indices.contains(&i),
-                app.bookmarks.contains(&i),
+                search_regex.as_ref(),
+                match_indices.contains(&i),
+                bookmarks.contains(&i),
                 file_color,
             )
         })
         .collect();
 
-    let help = if app.search_mode {
-        "ESC=exit  !term=exclude"
-    } else {
-        "Tab=switch Space=toggle Enter=solo"
-    };
-    let list_style = if app.focus == Focus::LogList {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default()
-    };
+    let mut list_state = ListState::default();
+    list_state.select(selected);
+
     let list = List::new(items)
         .block(
             Block::default()
@@ -372,7 +389,7 @@ pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .title(title)
                 .title_style(title_style)
                 .title_bottom(Line::from(help).right_aligned())
-                .border_style(list_style),
+                .border_style(border_style),
         )
         .highlight_style(
             Style::default()
@@ -380,14 +397,24 @@ pub fn render_log_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    frame.render_stateful_widget(list, area, &mut list_state);
 
-    // Custom scrollbar with error markers
-    render_error_scrollbar(frame, app, area);
+    // Custom scrollbar with error markers (only in normal mode)
+    if !is_focus_mode {
+        render_error_scrollbar_with_state(frame, area, &list_state, entries.len(), error_indices);
+    } else {
+        render_focus_scrollbar(frame, area, &list_state, entries.len());
+    }
 }
 
-fn render_error_scrollbar(frame: &mut Frame, app: &App, area: Rect) {
-    let total = app.filtered_entries.len();
+/// Render error scrollbar with explicit state
+fn render_error_scrollbar_with_state(
+    frame: &mut Frame,
+    area: Rect,
+    list_state: &ListState,
+    total: usize,
+    error_indices: &[usize],
+) {
     if total == 0 || area.height < 4 {
         return;
     }
@@ -397,7 +424,7 @@ fn render_error_scrollbar(frame: &mut Frame, app: &App, area: Rect) {
     let track_start_y = area.y + 1;
 
     let visible_rows = track_height;
-    let selected = app.list_state.selected().unwrap_or(0);
+    let selected = list_state.selected().unwrap_or(0);
 
     // Calculate thumb position and size based on visible window
     let thumb_size = ((visible_rows * track_height) / total.max(1))
@@ -415,8 +442,7 @@ fn render_error_scrollbar(frame: &mut Frame, app: &App, area: Rect) {
         let line_start = (y * total) / track_height;
         let line_end = ((y + 1) * total) / track_height;
 
-        let has_error = app
-            .error_indices
+        let has_error = error_indices
             .iter()
             .any(|&i| i >= line_start && i < line_end);
         let is_thumb = y >= thumb_pos && y < thumb_pos + thumb_size;
@@ -427,6 +453,123 @@ fn render_error_scrollbar(frame: &mut Frame, app: &App, area: Rect) {
             ("█", Style::default().fg(Color::Cyan))
         } else if has_error {
             ("█", Style::default().fg(Color::Red))
+        } else {
+            ("│", Style::default().fg(Color::DarkGray))
+        };
+
+        frame
+            .buffer_mut()
+            .set_string(scrollbar_x, track_start_y + y as u16, ch, style);
+    }
+}
+
+/// Render log list using app state (convenience wrapper for normal mode)
+pub fn render_log_list_from_app(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Clone the data we need for rendering
+    let entries = app.entries().to_vec();
+    let match_indices = app.match_indices.clone();
+    let bookmarks = app.bookmarks.clone();
+    let error_indices = app.error_indices.clone();
+
+    // Extract display data
+    let is_tailing = app.is_tailing;
+    let visible_levels = app.visible_levels.clone();
+    let filter_tid = app.filter_tid.clone();
+    let search_regex = app.search_regex.clone();
+    let focus = app.focus;
+    let search_mode = app.search_mode;
+    let files = app.files.clone();
+
+    // Get the list state
+    let selected = app.list_state.selected();
+
+    // Render the list
+    render_log_list_with_state(
+        frame,
+        area,
+        &entries,
+        selected,
+        &match_indices,
+        &bookmarks,
+        &error_indices,
+        is_tailing,
+        &visible_levels,
+        &filter_tid,
+        &search_regex,
+        focus,
+        search_mode,
+        &files,
+        false,
+        "",
+    );
+}
+
+/// Render log list in focus mode
+pub fn render_focus_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Clone the data we need for rendering
+    let entries = app.focus_mode.focus_logs.clone();
+    let bookmarks = app.bookmarks.clone();
+    let focus_query = app.focus_mode.focus_query.clone();
+    let visible_levels = app.visible_levels.clone();
+    let files = app.files.clone();
+
+    // Get the list state
+    let selected = app.focus_mode.focus_table_state.selected();
+
+    // Render the focus list (empty match_indices to hide yellow dots)
+    render_log_list_with_state(
+        frame,
+        area,
+        &entries,
+        selected,
+        &[], // No match indices in focus mode - all entries are matches
+        &bookmarks,
+        &[], // No error indices in focus mode
+        false, // Not tailing
+        &visible_levels,
+        &None, // No filter_tid in focus mode
+        &None, // No search_regex in focus mode
+        Focus::LogList, // Always use log list focus in focus mode
+        false, // Not search mode
+        &files,
+        true, // Is focus mode
+        &focus_query,
+    );
+}
+
+
+// Note: render_error_scrollbar_internal was removed as it's been replaced by render_error_scrollbar_with_state
+
+/// Render a simplified scrollbar for focus mode
+fn render_focus_scrollbar(frame: &mut Frame, area: Rect, list_state: &ListState, total: usize) {
+    if total == 0 || area.height < 4 {
+        return;
+    }
+
+    let track_height = area.height.saturating_sub(2) as usize;
+    let scrollbar_x = area.x + area.width - 1;
+    let track_start_y = area.y + 1;
+
+    let visible_rows = track_height;
+    let selected = list_state.selected().unwrap_or(0);
+
+    // Calculate thumb position and size
+    let thumb_size = ((visible_rows * track_height) / total.max(1))
+        .max(1)
+        .min(track_height);
+    let max_scroll = total.saturating_sub(visible_rows);
+    let scroll_pos = selected.saturating_sub(visible_rows / 2).min(max_scroll);
+    let thumb_pos = if max_scroll == 0 {
+        0
+    } else {
+        (scroll_pos * (track_height - thumb_size)) / max_scroll
+    };
+
+    for y in 0..track_height {
+        let is_thumb = y >= thumb_pos && y < thumb_pos + thumb_size;
+
+        let (ch, style) = if is_thumb {
+            ("█", Style::default().fg(Color::Cyan))
         } else {
             ("│", Style::default().fg(Color::DarkGray))
         };
@@ -577,6 +720,11 @@ pub fn render_help_popup(frame: &mut Frame) {
     let help_text = "\
 ━━━━━━━━━━━━━━━━━━━━ 视图切换 ━━━━━━━━━━━━━━━━━━━━
 F1 日志列表    F2 仪表盘    F3 AI聊天    F4 历史    F5 报告
+
+━━━━━━━━━━━━━━━━━━━━ 专注模式 (Focus Mode) ━━━━━━━━━━━━━━━━━
+F6          进入专注模式 (仅显示搜索结果)
+Esc         退出专注模式
+e           导出专注视图中的日志
 
 ━━━━━━━━━━━━━━━━━━━━ 导航操作 ━━━━━━━━━━━━━━━━━━━━
 ↑/↓ k/j     上下选择         ←/→        翻页

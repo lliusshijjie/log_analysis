@@ -8,6 +8,11 @@ pub struct UiLayout {
     pub histogram: Rect,
 }
 
+pub struct FocusLayout {
+    pub log_list: Rect,
+    pub detail: Rect,
+}
+
 pub fn create_layout(area: Rect, show_search: bool) -> UiLayout {
     let main_chunks =
         Layout::horizontal([Constraint::Percentage(18), Constraint::Percentage(82)]).split(area);
@@ -40,6 +45,22 @@ pub fn create_layout(area: Rect, show_search: bool) -> UiLayout {
         search_bar: chunks[1],
         detail: chunks[2],
         histogram: chunks[3],
+    }
+}
+
+/// Create a layout for Focus Mode - full width, no sidebar
+pub fn create_focus_layout(area: Rect) -> FocusLayout {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(10),  // log_list
+            Constraint::Length(10), // detail
+        ])
+        .split(area);
+
+    FocusLayout {
+        log_list: chunks[0],
+        detail: chunks[1],
     }
 }
 

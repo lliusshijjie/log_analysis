@@ -143,6 +143,7 @@ pub enum CurrentView {
     Chat,
     History,
     Report,
+    Focus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

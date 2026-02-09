@@ -11,11 +11,11 @@ use regex::Regex;
 use super::chat::render_chat_interface;
 use super::components::{
     render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_export_popup,
-    render_help_popup, render_histogram, render_jump_popup, render_log_list, render_search_bar,
-    render_sidebar,
+    render_focus_list, render_help_popup, render_histogram, render_jump_popup,
+    render_log_list_from_app, render_search_bar, render_sidebar,
 };
 use super::dashboard::{render_dashboard, render_header};
-use super::layout::create_layout;
+use super::layout::{create_focus_layout, create_layout};
 use super::search_modal::render_search_modal;
 use crate::app_state::App;
 use crate::filtering::filter_logs_owned;
@@ -41,12 +41,18 @@ fn ui(frame: &mut Frame, app: &mut App) {
         CurrentView::Logs => {
             let layout = create_layout(main_chunks[1], app.search_mode);
             render_sidebar(frame, app, layout.sidebar);
-            render_log_list(frame, app, layout.log_list);
+            render_log_list_from_app(frame, app, layout.log_list);
             if app.search_mode {
                 render_search_bar(frame, app, layout.search_bar);
             }
             render_detail_pane(frame, app, layout.detail);
             render_histogram(frame, app, layout.histogram);
+        }
+        CurrentView::Focus => {
+            // Focus mode: full-width layout without sidebar
+            let focus_layout = create_focus_layout(main_chunks[1]);
+            render_focus_list(frame, app, focus_layout.log_list);
+            render_detail_pane(frame, app, focus_layout.detail);
         }
         CurrentView::Dashboard => {
             render_dashboard(frame, app, main_chunks[1]);
@@ -273,8 +279,20 @@ pub fn run_app(
                         KeyCode::Esc => app.exit_search(),
                         KeyCode::Enter => {
                             let query = app.search_query.clone();
-                            app.update_search();
-                            app.exit_search();
+                            if app.current_view == CurrentView::Focus {
+                                // In focus mode: filter focus_logs
+                                app.focus_update_search();
+                                app.exit_search();
+                            } else if key.modifiers.contains(KeyModifiers::ALT) {
+                                // Alt+Enter: Enter focus mode with current search
+                                app.update_search();
+                                app.exit_search();
+                                app.enter_focus_mode(query.clone());
+                            } else {
+                                // Normal Enter: Apply search and stay in normal mode
+                                app.update_search();
+                                app.exit_search();
+                            }
                             app.history.add(crate::history::CommandType::Search, query);
                         }
                         KeyCode::Backspace => {
@@ -489,6 +507,12 @@ pub fn run_app(
                         KeyCode::F(3) => app.current_view = CurrentView::Chat,
                         KeyCode::F(4) => app.current_view = CurrentView::History,
                         KeyCode::F(5) => app.current_view = CurrentView::Report,
+                        KeyCode::F(6) => {
+                            let query = app.search_regex.as_ref()
+                                .map(|r| r.as_str().to_string())
+                                .unwrap_or_else(|| app.search_query.clone());
+                            app.enter_focus_mode(if query.is_empty() { "全部".to_string() } else { query });
+                        }
                         KeyCode::Tab => {
                             app.focus = if app.focus == Focus::LogList {
                                 Focus::FileList
@@ -579,6 +603,66 @@ pub fn run_app(
                         }
                         continue;
                     }
+                    // Focus Mode handling
+                    if app.current_view == CurrentView::Focus {
+                        match key.code {
+                            KeyCode::Esc => app.exit_focus_mode(),
+                            KeyCode::Up | KeyCode::Char('k') => app.focus_previous(),
+                            KeyCode::Down | KeyCode::Char('j') => app.focus_next(),
+                            KeyCode::Left => app.focus_previous_page(),
+                            KeyCode::Right => app.focus_next_page(),
+                            KeyCode::Char('g') => app.focus_jump_to_top(),
+                            KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.focus_jump_to_bottom()
+                            }
+                            KeyCode::Char('c') => {
+                                // Copy selected focus entry
+                                if let Some(entry) = app.get_current_selected() {
+                                    let text = match entry {
+                                        DisplayEntry::Normal(log) => format!(
+                                            "{} [{}:{}][{}]: {} ({}:{})",
+                                            log.timestamp,
+                                            log.pid,
+                                            log.tid,
+                                            log.level,
+                                            log.content,
+                                            log.source_file,
+                                            log.line_num
+                                        ),
+                                        DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
+                                    };
+                                    if let Some(ref mut clipboard) = app.clipboard {
+                                        if clipboard.set_text(text).is_ok() {
+                                            app.status_msg = Some(("Copied!".into(), Instant::now()));
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('e') => {
+                                // Export focus mode entries to file
+                                let filename = format!("focus_{}.log", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                                let content: String = app.focus_mode.focus_logs
+                                    .iter()
+                                    .map(|e| e.get_content())
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                match std::fs::write(&filename, content) {
+                                    Ok(_) => app.status_msg = Some((format!("已导出到 {}", filename), Instant::now())),
+                                    Err(e) => app.status_msg = Some((format!("导出失败: {}", e), Instant::now())),
+                                }
+                            }
+                            KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                // Open advanced search form in focus mode
+                                app.search_form.open();
+                            }
+                            KeyCode::Char('/') => {
+                                // Quick search in focus mode
+                                app.start_search();
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
                     if app.current_view == CurrentView::Chat {
                         match key.code {
                             KeyCode::Char('i') => app.input_mode = InputMode::ChatInput,
@@ -637,6 +721,15 @@ pub fn run_app(
                             }
                             KeyCode::Char(':') => app.enter_jump_mode(),
                             KeyCode::Char('/') => app.start_search(),
+                            KeyCode::Enter => {
+                                if key.modifiers.contains(KeyModifiers::ALT) {
+                                    // Alt+Enter: Enter focus mode with current search results
+                                    let query = app.search_regex.as_ref()
+                                        .map(|r| r.as_str().to_string())
+                                        .unwrap_or_else(|| app.search_query.clone());
+                                    app.enter_focus_mode(if query.is_empty() { "全部".to_string() } else { query });
+                                }
+                            }
                             KeyCode::Char('n') => app.next_match(),
                             KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.prev_match()

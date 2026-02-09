@@ -16,10 +16,50 @@ use crate::models::{
 use crate::report::{ReportCache, ReportPeriod};
 use crate::search_form::SearchFormState;
 
+/// Focus mode state for isolated search results
+#[derive(Default)]
+pub struct FocusModeState {
+    /// Isolated search results
+    pub focus_logs: Vec<DisplayEntry>,
+    /// Original focus logs before any sub-search
+    pub original_focus_logs: Vec<DisplayEntry>,
+    /// Separate scroll state for focus mode
+    pub focus_table_state: ListState,
+    /// Query that generated the focus results
+    pub focus_query: String,
+    /// Original match indices from the search
+    pub focus_match_indices: Vec<usize>,
+    /// Current match index in focus mode
+    pub focus_current_match: usize,
+}
+
+impl FocusModeState {
+    pub fn new() -> Self {
+        Self {
+            focus_logs: Vec::new(),
+            original_focus_logs: Vec::new(),
+            focus_table_state: ListState::default(),
+            focus_query: String::new(),
+            focus_match_indices: Vec::new(),
+            focus_current_match: 0,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.focus_logs.clear();
+        self.original_focus_logs.clear();
+        self.focus_table_state = ListState::default();
+        self.focus_query.clear();
+        self.focus_match_indices.clear();
+        self.focus_current_match = 0;
+    }
+}
+
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
     pub filtered_entries: Vec<DisplayEntry>,
     pub list_state: ListState,
+    pub focus_mode: FocusModeState,
     pub filter_tid: Option<String>,
     pub search_mode: bool,
     pub search_query: String,
@@ -98,6 +138,7 @@ impl App {
             all_entries: entries.clone(),
             filtered_entries: entries,
             list_state,
+            focus_mode: FocusModeState::new(),
             filter_tid: None,
             search_mode: false,
             search_query: String::new(),
@@ -658,6 +699,206 @@ impl App {
                 self.current_view = CurrentView::Chat;
                 self.chat_input = entry.content.clone();
             }
+        }
+    }
+
+    // ========== Focus Mode Methods ==========
+
+    /// Enter focus mode with the current search query
+    /// Creates a filtered view containing only matching log lines
+    pub fn enter_focus_mode(&mut self, query: String) {
+        // Clone the matching entries to focus_logs
+        self.focus_mode.focus_logs = if let Some(re) = &self.search_regex {
+            self.filtered_entries
+                .iter()
+                .filter(|e| {
+                    let matches = re.is_match(&e.get_searchable_text());
+                    if self.negative_search {
+                        !matches
+                    } else {
+                        matches
+                    }
+                })
+                .cloned()
+                .collect()
+        } else {
+            // If no search regex, enter focus mode with all currently filtered entries
+            self.filtered_entries.clone()
+        };
+
+        // Store original focus logs for sub-search
+        self.focus_mode.original_focus_logs = self.focus_mode.focus_logs.clone();
+
+        // Store the query for display
+        self.focus_mode.focus_query = query;
+
+        // Reset focus table state and select first item
+        self.focus_mode.focus_table_state = ListState::default();
+        if !self.focus_mode.focus_logs.is_empty() {
+            self.focus_mode.focus_table_state.select(Some(0));
+        }
+
+        // Store match indices (all indices in focus mode are "matches")
+        self.focus_mode.focus_match_indices = (0..self.focus_mode.focus_logs.len()).collect();
+        self.focus_mode.focus_current_match = 0;
+
+        // Switch to focus view
+        self.current_view = CurrentView::Focus;
+    }
+
+    /// Update search within focus mode - filters original_focus_logs
+    pub fn focus_update_search(&mut self) {
+        if self.search_query.is_empty() {
+            // Reset to original logs if search is cleared
+            self.focus_mode.focus_logs = self.focus_mode.original_focus_logs.clone();
+        } else {
+            let negative = self.search_query.starts_with('!');
+            let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
+            
+            if let Ok(re) = Regex::new(pattern) {
+                self.focus_mode.focus_logs = self.focus_mode.original_focus_logs
+                    .iter()
+                    .filter(|e| {
+                        let matches = re.is_match(&e.get_searchable_text());
+                        if negative { !matches } else { matches }
+                    })
+                    .cloned()
+                    .collect();
+            }
+        }
+        
+        // Update focus query display
+        self.focus_mode.focus_query = if self.search_query.is_empty() {
+            "全部".to_string()
+        } else {
+            self.search_query.clone()
+        };
+
+        // Reset selection
+        self.focus_mode.focus_table_state = ListState::default();
+        if !self.focus_mode.focus_logs.is_empty() {
+            self.focus_mode.focus_table_state.select(Some(0));
+        }
+    }
+
+    /// Exit focus mode and return to normal log view
+    pub fn exit_focus_mode(&mut self) {
+        self.focus_mode.reset();
+        self.current_view = CurrentView::Logs;
+    }
+
+    /// Check if we're currently in focus mode
+    pub fn is_focus_mode(&self) -> bool {
+        matches!(self.current_view, CurrentView::Focus)
+    }
+
+    /// Get the current entries based on view mode
+    pub fn get_current_entries(&self) -> &[DisplayEntry] {
+        if self.is_focus_mode() {
+            &self.focus_mode.focus_logs
+        } else {
+            &self.filtered_entries
+        }
+    }
+
+    /// Get the current list state based on view mode
+    pub fn get_current_list_state(&mut self) -> &mut ListState {
+        if self.is_focus_mode() {
+            &mut self.focus_mode.focus_table_state
+        } else {
+            &mut self.list_state
+        }
+    }
+
+    /// Get the selected entry in the current view
+    pub fn get_current_selected(&self) -> Option<&DisplayEntry> {
+        if self.is_focus_mode() {
+            self.focus_mode
+                .focus_table_state
+                .selected()
+                .and_then(|i| self.focus_mode.focus_logs.get(i))
+        } else {
+            self.list_state
+                .selected()
+                .and_then(|i| self.filtered_entries.get(i))
+        }
+    }
+
+    /// Navigation methods for focus mode
+    pub fn focus_next(&mut self) {
+        let len = self.focus_mode.focus_logs.len();
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .focus_mode
+            .focus_table_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
+        self.focus_mode.focus_table_state.select(Some(i));
+    }
+
+    pub fn focus_previous(&mut self) {
+        if self.focus_mode.focus_logs.is_empty() {
+            return;
+        }
+        let i = self
+            .focus_mode
+            .focus_table_state
+            .selected()
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(0);
+        self.focus_mode.focus_table_state.select(Some(i));
+    }
+
+    pub fn focus_next_page(&mut self) {
+        let len = self.focus_mode.focus_logs.len();
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .focus_mode
+            .focus_table_state
+            .selected()
+            .map(|i| i.saturating_add(self.page_size).min(len - 1))
+            .unwrap_or(0);
+        self.focus_mode.focus_table_state.select(Some(i));
+    }
+
+    pub fn focus_previous_page(&mut self) {
+        if self.focus_mode.focus_logs.is_empty() {
+            return;
+        }
+        let i = self
+            .focus_mode
+            .focus_table_state
+            .selected()
+            .map(|i| i.saturating_sub(self.page_size))
+            .unwrap_or(0);
+        self.focus_mode.focus_table_state.select(Some(i));
+    }
+
+    pub fn focus_jump_to_top(&mut self) {
+        if !self.focus_mode.focus_logs.is_empty() {
+            self.focus_mode.focus_table_state.select(Some(0));
+        }
+    }
+
+    pub fn focus_jump_to_bottom(&mut self) {
+        let len = self.focus_mode.focus_logs.len();
+        if len > 0 {
+            self.focus_mode.focus_table_state.select(Some(len - 1));
+        }
+    }
+
+    /// Get bookmarks in the current view
+    pub fn get_current_bookmarks(&self) -> &BTreeSet<usize> {
+        if self.is_focus_mode() {
+            // In focus mode, we use the main bookmarks set
+            &self.bookmarks
+        } else {
+            &self.bookmarks
         }
     }
 }
