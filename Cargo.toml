@@ -1,6 +1,6 @@
 [package]
 name = "log-insight-tui"
-version = "0.2.0"
+version = "1.0.0"
 edition = "2021"
 description = "A powerful TUI log analyzer with smart visualization, live tailing, and AI integration."
 license = "MIT OR Apache-2.0"
