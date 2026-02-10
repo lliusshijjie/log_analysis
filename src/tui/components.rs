@@ -42,11 +42,15 @@ fn render_list_item(
     is_match: bool,
     is_bookmarked: bool,
     file_color: Color,
+    display_index: Option<usize>,
 ) -> ListItem<'static> {
-    let line_idx = entry
-        .get_line_index()
-        .map(|n| format!("{:>5} ", n))
-        .unwrap_or_else(|| "      ".into());
+    let line_idx = if let Some(n) = display_index {
+        format!("{:>5} ", n)
+    } else {
+        entry.get_line_index()
+            .map(|n| format!("{:>5} ", n))
+            .unwrap_or_else(|| "      ".into())
+    };
     let bookmark = if is_bookmarked { "🔖" } else { " " };
     let marker = if is_match { "●" } else { " " };
     match entry {
@@ -347,9 +351,9 @@ fn render_log_list_with_state(
             Style::default()
         };
         let help = if search_mode {
-            "ESC=exit  Alt+Enter=Focus模式"
+            "ESC=exit  F6=Focus模式"
         } else {
-            "Tab=switch Space=toggle Enter=solo Alt+Enter=Focus模式"
+            "Tab=switch Space=toggle Enter=solo F6=Focus模式"
         };
         (title, title_style, list_style, help)
     };
@@ -369,12 +373,14 @@ fn render_log_list_with_state(
             let file_color = e.get_source_id()
                 .map(|sid| get_file_color(sid))
                 .unwrap_or(Color::White);
+            let idx = if is_focus_mode { Some(i + 1) } else { None };
             render_list_item(
                 e,
                 search_regex.as_ref(),
                 match_indices.contains(&i),
                 bookmarks.contains(&i),
                 file_color,
+                idx,
             )
         })
         .collect();

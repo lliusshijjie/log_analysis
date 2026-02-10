@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogInsight Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#1a1b26] text-[#a9b1d6]">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-white">LogInsight Dashboard</h1>
+            <div id="clock" class="text-xl text-[#7aa2f7]"></div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-[#24283b] p-6 rounded-lg shadow-lg">
+                <h3 class="text-[#7aa2f7] text-lg mb-2">Total Logs</h3>
+                <p id="total-logs" class="text-4xl font-bold text-white">-</p>
+            </div>
+            <div class="bg-[#24283b] p-6 rounded-lg shadow-lg">
+                <h3 class="text-[#f7768e] text-lg mb-2">Error Count</h3>
+                <p id="error-count" class="text-4xl font-bold text-white">-</p>
+            </div>
+            <div class="bg-[#24283b] p-6 rounded-lg shadow-lg">
+                <h3 class="text-[#9ece6a] text-lg mb-2">Health Score</h3>
+                <p id="health-score" class="text-4xl font-bold text-white">-</p>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Error Trend Chart -->
+            <div class="bg-[#24283b] p-6 rounded-lg shadow-lg">
+                <h3 class="text-[#7aa2f7] text-lg mb-4">Error Trend</h3>
+                <div id="error-trend-chart" style="height: 300px;"></div>
+            </div>
+
+            <!-- Top Sources Chart -->
+            <div class="bg-[#24283b] p-6 rounded-lg shadow-lg">
+                <h3 class="text-[#7aa2f7] text-lg mb-4">Top Sources</h3>
+                <div id="top-sources-chart" style="height: 300px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize charts
+        const errorTrendChart = echarts.init(document.getElementById('error-trend-chart'));
+        const topSourcesChart = echarts.init(document.getElementById('top-sources-chart'));
+
+        // Fetch stats every 2 seconds
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+
+                // Update cards
+                document.getElementById('total-logs').textContent = stats.total_logs.toLocaleString();
+                document.getElementById('error-count').textContent = stats.error_count.toLocaleString();
+                document.getElementById('health-score').textContent = stats.health_score + '%';
+
+                // Update error trend chart
+                errorTrendChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'axis' },
+                    xAxis: {
+                        type: 'category',
+                        data: stats.error_trend.map(t => t[0]),
+                        axisLine: { lineStyle: { color: '#565f89' } },
+                        axisLabel: { color: '#a9b1d6' }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLine: { lineStyle: { color: '#565f89' } },
+                        axisLabel: { color: '#a9b1d6' },
+                        splitLine: { lineStyle: { color: '#414868' } }
+                    },
+                    series: [{
+                        data: stats.error_trend.map(t => t[1]),
+                        type: 'line',
+                        smooth: true,
+                        areaStyle: {
+                            color: {
+                                type: 'linear',
+                                x: 0, y: 0, x2: 0, y2: 1,
+                                colorStops: [
+                                    { offset: 0, color: 'rgba(247, 118, 142, 0.3)' },
+                                    { offset: 1, color: 'rgba(247, 118, 142, 0)' }
+                                ]
+                            }
+                        },
+                        lineStyle: { color: '#f7768e', width: 2 },
+                        itemStyle: { color: '#f7768e' }
+                    }]
+                });
+
+                // Update top sources chart
+                topSourcesChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'item' },
+                    series: [{
+                        type: 'pie',
+                        data: stats.top_sources.map(s => ({ value: s[1], name: s[0] })),
+                        radius: ['40%', '70%'],
+                        itemStyle: {
+                            borderRadius: 10,
+                            borderColor: '#24283b',
+                            borderWidth: 2
+                        },
+                        label: {
+                            color: '#a9b1d6'
+                        }
+                    }]
+                });
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+            }
+        }
+
+        // Update clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleTimeString();
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            errorTrendChart.resize();
+            topSourcesChart.resize();
+        });
+
+        // Initial fetch and start interval
+        fetchStats();
+        updateClock();
+        setInterval(fetchStats, 2000);
+        setInterval(updateClock, 1000);
+    </script>
+</body>
+</html>

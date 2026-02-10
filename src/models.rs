@@ -27,6 +27,7 @@ pub enum InputMode {
     AiPromptInput,
     ChatInput,
     ReportSaveInput,
+    FocusCopyInput,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -165,7 +166,7 @@ pub struct ChatContext {
     pub pinned_logs: Vec<LogEntry>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub struct DashboardStats {
     pub total_logs: usize,
     pub error_count: usize,

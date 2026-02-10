@@ -31,6 +31,7 @@ pub struct FocusModeState {
     pub focus_match_indices: Vec<usize>,
     /// Current match index in focus mode
     pub focus_current_match: usize,
+    pub copy_input: String,
 }
 
 impl FocusModeState {
@@ -42,6 +43,7 @@ impl FocusModeState {
             focus_query: String::new(),
             focus_match_indices: Vec::new(),
             focus_current_match: 0,
+            copy_input: String::new(),
         }
     }
 
@@ -52,6 +54,7 @@ impl FocusModeState {
         self.focus_query.clear();
         self.focus_match_indices.clear();
         self.focus_current_match = 0;
+        self.copy_input.clear();
     }
 }
 
@@ -508,6 +511,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_file_color(&self, source_id: usize) -> Color {
         self.files
             .iter()
@@ -788,11 +792,13 @@ impl App {
     }
 
     /// Check if we're currently in focus mode
+    #[allow(dead_code)]
     pub fn is_focus_mode(&self) -> bool {
         matches!(self.current_view, CurrentView::Focus)
     }
 
     /// Get the current entries based on view mode
+    #[allow(dead_code)]
     pub fn get_current_entries(&self) -> &[DisplayEntry] {
         if self.is_focus_mode() {
             &self.focus_mode.focus_logs
@@ -802,6 +808,7 @@ impl App {
     }
 
     /// Get the current list state based on view mode
+    #[allow(dead_code)]
     pub fn get_current_list_state(&mut self) -> &mut ListState {
         if self.is_focus_mode() {
             &mut self.focus_mode.focus_table_state
@@ -811,6 +818,7 @@ impl App {
     }
 
     /// Get the selected entry in the current view
+    #[allow(dead_code)]
     pub fn get_current_selected(&self) -> Option<&DisplayEntry> {
         if self.is_focus_mode() {
             self.focus_mode
@@ -893,6 +901,7 @@ impl App {
     }
 
     /// Get bookmarks in the current view
+    #[allow(dead_code)]
     pub fn get_current_bookmarks(&self) -> &BTreeSet<usize> {
         if self.is_focus_mode() {
             // In focus mode, we use the main bookmarks set

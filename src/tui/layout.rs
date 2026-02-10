@@ -10,6 +10,7 @@ pub struct UiLayout {
 
 pub struct FocusLayout {
     pub log_list: Rect,
+    pub search_bar: Rect,
     pub detail: Rect,
 }
 
@@ -49,18 +50,21 @@ pub fn create_layout(area: Rect, show_search: bool) -> UiLayout {
 }
 
 /// Create a layout for Focus Mode - full width, no sidebar
-pub fn create_focus_layout(area: Rect) -> FocusLayout {
+pub fn create_focus_layout(area: Rect, show_search: bool) -> FocusLayout {
+    let search_height = if show_search { 3 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),  // log_list
-            Constraint::Length(10), // detail
+            Constraint::Min(10),
+            Constraint::Length(search_height),
+            Constraint::Length(10),
         ])
         .split(area);
 
     FocusLayout {
         log_list: chunks[0],
-        detail: chunks[1],
+        search_bar: chunks[1],
+        detail: chunks[2],
     }
 }
 

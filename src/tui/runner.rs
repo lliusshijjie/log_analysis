@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use regex::Regex;
 
 use super::chat::render_chat_interface;
@@ -15,7 +16,7 @@ use super::components::{
     render_log_list_from_app, render_search_bar, render_sidebar,
 };
 use super::dashboard::{render_dashboard, render_header};
-use super::layout::{create_focus_layout, create_layout};
+use super::layout::{centered_rect, create_focus_layout, create_layout};
 use super::search_modal::render_search_modal;
 use crate::app_state::App;
 use crate::filtering::filter_logs_owned;
@@ -50,9 +51,34 @@ fn ui(frame: &mut Frame, app: &mut App) {
         }
         CurrentView::Focus => {
             // Focus mode: full-width layout without sidebar
-            let focus_layout = create_focus_layout(main_chunks[1]);
+            let focus_layout = create_focus_layout(main_chunks[1], app.search_mode);
             render_focus_list(frame, app, focus_layout.log_list);
+            if app.search_mode {
+                render_search_bar(frame, app, focus_layout.search_bar);
+            }
             render_detail_pane(frame, app, focus_layout.detail);
+            if app.input_mode == InputMode::FocusCopyInput {
+                let popup_area = centered_rect(40, 15, frame.area());
+                frame.render_widget(Clear, popup_area);
+                let display_text = if app.focus_mode.copy_input.is_empty() {
+                    Span::styled("请输入行号, 如: 1-5, 3, 7-10", Style::default().fg(Color::DarkGray))
+                } else {
+                    Span::raw(app.focus_mode.copy_input.clone())
+                };
+                let input = Paragraph::new(Line::from(display_text))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(Color::Cyan))
+                            .title(" 复制行号 (如: 1-5, 3, 7-10) ")
+                            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    );
+                frame.render_widget(input, popup_area);
+                frame.set_cursor_position((
+                    popup_area.x + app.focus_mode.copy_input.len() as u16 + 1,
+                    popup_area.y + 1,
+                ));
+            }
         }
         CurrentView::Dashboard => {
             render_dashboard(frame, app, main_chunks[1]);
@@ -86,6 +112,7 @@ pub fn run_app(
     re: &Regex,
 ) -> Result<()> {
     loop {
+        // State updates
         if let Ok(result) = app.ai_rx.try_recv() {
             app.ai_state = match result {
                 Ok(s) => AiState::Completed(s),
@@ -146,9 +173,14 @@ pub fn run_app(
             }
         }
 
+        // Render UI
         terminal.draw(|f| ui(f, app))?;
 
-        if event::poll(Duration::from_millis(16))? {
+        // Drain all pending key events before next render
+        if !event::poll(Duration::from_millis(16))? {
+            continue;
+        }
+        while event::poll(Duration::from_millis(0))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
                     continue;
@@ -269,6 +301,58 @@ pub fn run_app(
                             app.chat_input.pop();
                         }
                         KeyCode::Char(c) => app.chat_input.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if app.input_mode == InputMode::FocusCopyInput {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.focus_mode.copy_input.clear();
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Enter => {
+                            let input = app.focus_mode.copy_input.clone();
+                            let mut indices: Vec<usize> = Vec::new();
+                            for part in input.split(',') {
+                                let part = part.trim();
+                                if let Some((a, b)) = part.split_once('-') {
+                                    if let (Ok(start), Ok(end)) = (a.trim().parse::<usize>(), b.trim().parse::<usize>()) {
+                                        for i in start..=end {
+                                            indices.push(i);
+                                        }
+                                    }
+                                } else if let Ok(n) = part.parse::<usize>() {
+                                    indices.push(n);
+                                }
+                            }
+                            indices.sort();
+                            indices.dedup();
+                            let total = app.focus_mode.focus_logs.len();
+                            let text: String = indices.iter()
+                                .filter(|&&i| i >= 1 && i <= total)
+                                .map(|&i| app.focus_mode.focus_logs[i - 1].get_content())
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            if !text.is_empty() {
+                                if let Some(ref mut clipboard) = app.clipboard {
+                                    if clipboard.set_text(text).is_ok() {
+                                        app.status_msg = Some((format!("已复制 {} 行", indices.len()), Instant::now()));
+                                    }
+                                }
+                            } else {
+                                app.status_msg = Some(("无效的行号".into(), Instant::now()));
+                            }
+                            app.focus_mode.copy_input.clear();
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Backspace => {
+                            app.focus_mode.copy_input.pop();
+                        }
+                        KeyCode::Char(c) if c.is_ascii_digit() || c == '-' || c == ',' => {
+                            app.focus_mode.copy_input.push(c);
+                        }
                         _ => {}
                     }
                     continue;
@@ -616,27 +700,8 @@ pub fn run_app(
                                 app.focus_jump_to_bottom()
                             }
                             KeyCode::Char('c') => {
-                                // Copy selected focus entry
-                                if let Some(entry) = app.get_current_selected() {
-                                    let text = match entry {
-                                        DisplayEntry::Normal(log) => format!(
-                                            "{} [{}:{}][{}]: {} ({}:{})",
-                                            log.timestamp,
-                                            log.pid,
-                                            log.tid,
-                                            log.level,
-                                            log.content,
-                                            log.source_file,
-                                            log.line_num
-                                        ),
-                                        DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
-                                    };
-                                    if let Some(ref mut clipboard) = app.clipboard {
-                                        if clipboard.set_text(text).is_ok() {
-                                            app.status_msg = Some(("Copied!".into(), Instant::now()));
-                                        }
-                                    }
-                                }
+                                app.focus_mode.copy_input.clear();
+                                app.input_mode = InputMode::FocusCopyInput;
                             }
                             KeyCode::Char('e') => {
                                 // Export focus mode entries to file

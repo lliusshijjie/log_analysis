@@ -15,6 +15,7 @@ mod templates;
 mod time_parser;
 mod report;
 mod tui;
+mod web;
 
 use std::fs::File;
 use std::io::stdout;
@@ -126,7 +127,10 @@ fn main() -> Result<()> {
         report_resp_rx,
         config.theme.page_size,
     );
-    app.stats = stats;
+    app.stats = stats.clone();
+
+    // Create shared state for web server
+    let web_shared_state = web::state::WebSharedState::new(stats);
 
     // 6. Setup file watcher for live tailing
     let (file_tx, file_rx) = std_mpsc::channel();
@@ -158,7 +162,12 @@ fn main() -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // 8. Run event loop
+    // 8. Spawn web server
+    rt.spawn(async move {
+        web::server::start_web_server(web_shared_state).await;
+    });
+
+    // 9. Run event loop
     let result = run_app(
         &mut terminal,
         &mut app,
