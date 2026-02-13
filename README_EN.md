@@ -35,6 +35,16 @@ cargo run -- file1.log file2.log file3.log
         - **Sub-search (`/`)**: Further filter results within focus view.
         - **Export (`e`)**: Export focus view logs.
         - **Exit**: Press `Esc` to return to normal view.
+- **Trace Filtering**:
+    - **Trigger**: Press `Shift+T` to extract correlation ID (traceId/requestId/UUID) from selected log.
+    - **Function**: Automatically filters logs containing the same correlation ID for complete request tracing.
+    - **Visual ID**: Magenta title bar showing `[FILTER: Trace <ID>]`.
+    - **Configurable**: Custom correlation ID regex patterns in `log_config.toml`.
+- **Horizontal Scroll & Word Wrap**:
+    - **Horizontal Scroll**: Press `h` to scroll left, `l` to scroll right for viewing long log lines.
+    - **Word Wrap**: Press `w` to toggle word wrap mode for automatic line breaking.
+    - **Reset Scroll**: Press `Shift+H` to reset horizontal scroll to line start.
+    - **Mutual Exclusion**: Horizontal scroll is disabled when word wrap is enabled.
 - **Original Line Numbers**: Displays line numbers (Ln) from the original file for easy cross-referencing.
 - **Quick Jump**: Direct jump by line number or top/bottom navigation.
 - **Live Tailing**: `tail -f` like real-time monitoring. Automatically detects and incremental loads new lines.
@@ -50,6 +60,14 @@ cargo run -- file1.log file2.log file3.log
     - **Error Pulse**: Sparkline for recent error frequency trends.
     - **Source Distribution**: Pie-chart style visualization for top 5 log sources.
     - **Trend Histogram**: Real-time minute/hour log volume and error trends.
+- **Trace Filtering**:
+    - **Trigger**: Press `Shift+T` on a log entry to extract correlation IDs (traceId, requestId, UUID, etc.).
+    - **Function**: Filters all logs containing the same correlation ID for request tracing.
+    - **Visual ID**: Magenta title showing the traced ID.
+- **Horizontal Scrolling**:
+    - **Scroll**: Press `h` / `l` to scroll log content left/right (5 characters).
+    - **Reset**: Press `Shift+H` to reset horizontal scroll to start.
+    - **Word Wrap**: Press `w` to toggle word wrap mode.
 - **Error Mini-map**: Right sidebar indicates relative positions of Error logs for quick navigation.
 - **AI Chat Interface (F3)**:
     - Dedicated view for multi-turn AI dialogue.
