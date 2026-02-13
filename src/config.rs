@@ -24,6 +24,9 @@ pub struct FiltersConfig {
     pub fold_threshold: usize,
     pub fold_rules: Vec<FoldRule>,
     pub ignore_patterns: Vec<String>,
+    /// Regex patterns to extract correlation IDs (e.g., traceId, requestId)
+    #[serde(default = "default_correlation_patterns")]
+    pub correlation_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,8 +87,16 @@ impl Default for FiltersConfig {
                 },
             ],
             ignore_patterns: vec![],
+            correlation_patterns: default_correlation_patterns(),
         }
     }
+}
+
+fn default_correlation_patterns() -> Vec<String> {
+    vec![
+        r"(?i)(?:trace[_-]?id|request[_-]?id|req[_-]?id|correlation[_-]?id|session[_-]?id)[=:\s\x22]+([a-zA-Z0-9_-]{8,64})".to_string(),
+        r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b".to_string(),
+    ]
 }
 
 impl Default for ThemeConfig {
@@ -115,7 +126,7 @@ impl AppConfig {
             fs::write(path, content)?;
             Ok(config)
         } else {
-            anyhow::bail!("配置文件不存在: {:?}", path)
+            anyhow::bail!("Config file not found: {:?}", path)
         }
     }
 }

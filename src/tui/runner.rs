@@ -800,8 +800,12 @@ pub fn run_app(
                                 app.prev_match()
                             }
                             KeyCode::Char('t') => app.toggle_thread_filter(),
+                            KeyCode::Char('T') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.toggle_trace_filter()
+                            }
                             KeyCode::Esc => {
                                 app.filter_tid = None;
+                                app.filter_trace = None;
                                 app.apply_filter();
                             }
                             KeyCode::Char('c') => app.copy_line(),
@@ -833,6 +837,21 @@ pub fn run_app(
                             KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.search_form.open();
                             }
+                            // Horizontal scroll and wrap controls
+                            KeyCode::Char('h') => {
+                                if !app.wrap_lines {
+                                    app.scroll_horizontal_left(5);
+                                }
+                            }
+                            KeyCode::Char('l') => {
+                                if !app.wrap_lines {
+                                    app.scroll_horizontal_right(5);
+                                }
+                            }
+                            KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.reset_horizontal_scroll();
+                            }
+                            KeyCode::Char('w') => app.toggle_wrap_lines(),
                             _ => {}
                         },
                     }

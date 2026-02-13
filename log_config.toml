@@ -5,6 +5,12 @@ timestamp_format = "%Y-%m-%d %H:%M:%S%.3f"
 [filters]
 fold_threshold = 3
 ignore_patterns = []
+# Regex patterns to extract correlation IDs for trace filtering (Shift+T)
+# Supports: traceId, requestId, correlationId, sessionId, UUID
+correlation_patterns = [
+    '(?i)(?:trace[_-]?id|request[_-]?id|req[_-]?id|correlation[_-]?id|session[_-]?id)[=:\s\"]+([a-zA-Z0-9_-]{8,64})',
+    '\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b',
+]
 
 [[filters.fold_rules]]
 name = "USB polling"

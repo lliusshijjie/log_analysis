@@ -129,6 +129,9 @@ fn main() -> Result<()> {
     );
     app.stats = stats.clone();
 
+    // Initialize correlation regexes for trace filtering
+    app.load_correlation_patterns(&config.filters.correlation_patterns);
+
     // Create shared state for web server
     let web_shared_state = web::state::WebSharedState::new(stats);
 

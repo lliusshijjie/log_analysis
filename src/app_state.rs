@@ -64,6 +64,8 @@ pub struct App {
     pub list_state: ListState,
     pub focus_mode: FocusModeState,
     pub filter_tid: Option<String>,
+    pub filter_trace: Option<String>,
+    pub correlation_regexes: Vec<Regex>,
     pub search_mode: bool,
     pub search_query: String,
     pub search_regex: Option<Regex>,
@@ -94,6 +96,9 @@ pub struct App {
     pub page_size: usize,
     pub error_indices: Vec<usize>,
     pub chart_scroll: usize,
+    // Horizontal scroll and wrap settings
+    pub horizontal_scroll: usize,
+    pub wrap_lines: bool,
     // Chat state
     pub chat_history: Vec<ChatMessage>,
     pub chat_context: ChatContext,
@@ -143,6 +148,8 @@ impl App {
             list_state,
             focus_mode: FocusModeState::new(),
             filter_tid: None,
+            filter_trace: None,
+            correlation_regexes: Vec::new(),
             search_mode: false,
             search_query: String::new(),
             search_regex: None,
@@ -173,6 +180,8 @@ impl App {
             page_size,
             error_indices,
             chart_scroll: 0,
+            horizontal_scroll: 0,
+            wrap_lines: false,
             chat_history: Vec::new(),
             chat_context: ChatContext::default(),
             chat_input: String::new(),
@@ -264,10 +273,89 @@ impl App {
         self.chart_scroll = self.chart_scroll.saturating_sub(1);
     }
 
+    /// Scroll content horizontally to the right (show more content on the right)
+    pub fn scroll_horizontal_right(&mut self, step: usize) {
+        self.horizontal_scroll = self.horizontal_scroll.saturating_add(step);
+    }
+
+    /// Scroll content horizontally to the left (show more content on the left)
+    pub fn scroll_horizontal_left(&mut self, step: usize) {
+        self.horizontal_scroll = self.horizontal_scroll.saturating_sub(step);
+    }
+
+    /// Reset horizontal scroll to beginning
+    pub fn reset_horizontal_scroll(&mut self) {
+        self.horizontal_scroll = 0;
+    }
+
+    /// Toggle line wrapping mode
+    pub fn toggle_wrap_lines(&mut self) {
+        self.wrap_lines = !self.wrap_lines;
+        if self.wrap_lines {
+            // When wrap is enabled, reset horizontal scroll
+            self.horizontal_scroll = 0;
+        }
+        let status = if self.wrap_lines { "已开启" } else { "已关闭" };
+        self.status_msg = Some((format!("自动换行: {}", status), Instant::now()));
+    }
+
     pub fn selected_entry(&self) -> Option<&DisplayEntry> {
         self.list_state
             .selected()
             .and_then(|i| self.filtered_entries.get(i))
+    }
+
+    /// Load correlation regex patterns from config
+    pub fn load_correlation_patterns(&mut self, patterns: &[String]) {
+        self.correlation_regexes = patterns
+            .iter()
+            .filter_map(|p| Regex::new(p).ok())
+            .collect();
+    }
+
+    /// Extract a correlation ID from the selected log entry using configured patterns
+    fn extract_correlation_id(&self, entry: &DisplayEntry) -> Option<String> {
+        if let DisplayEntry::Normal(log) = entry {
+            let text = format!("{} {}", log.content, log.tid);
+            for re in &self.correlation_regexes {
+                if let Some(caps) = re.captures(&text) {
+                    // Try capture group 1 first (named ID), fall back to group 0
+                    let id = caps.get(1)
+                        .or_else(|| caps.get(0))
+                        .map(|m| m.as_str().to_string());
+                    if let Some(id) = id {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn toggle_trace_filter(&mut self) {
+        if self.filter_trace.is_some() {
+            self.filter_trace = None;
+            self.status_msg = Some(("已清除链路追踪".into(), Instant::now()));
+            self.apply_filter();
+        } else if let Some(entry) = self.selected_entry().cloned() {
+            if let Some(trace_id) = self.extract_correlation_id(&entry) {
+                self.status_msg = Some((format!("追踪链路: {}", &trace_id), Instant::now()));
+                self.filter_trace = Some(trace_id);
+                self.apply_filter();
+            } else {
+                self.status_msg = Some(("未找到关联 ID (traceId/requestId/UUID)".into(), Instant::now()));
+            }
+        }
+    }
+
+    /// Clear trace filter directly (reserved for future use)
+    #[allow(dead_code)]
+    pub fn clear_trace_filter(&mut self) {
+        if self.filter_trace.is_some() {
+            self.filter_trace = None;
+            self.status_msg = Some(("已清除链路追踪".into(), Instant::now()));
+            self.apply_filter();
+        }
     }
 
     pub fn toggle_thread_filter(&mut self) {
@@ -303,6 +391,17 @@ impl App {
                 }
                 if let Some(tid) = &self.filter_tid {
                     if e.get_tid() != Some(tid) {
+                        return false;
+                    }
+                }
+                if let Some(trace_id) = &self.filter_trace {
+                    if let DisplayEntry::Normal(log) = e {
+                        if !log.content.contains(trace_id.as_str())
+                            && !log.tid.contains(trace_id.as_str())
+                        {
+                            return false;
+                        }
+                    } else {
                         return false;
                     }
                 }

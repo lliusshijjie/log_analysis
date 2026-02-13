@@ -36,13 +36,60 @@ fn delta_span(delta_ms: Option<i64>) -> Option<Span<'static>> {
     }
 }
 
+/// Apply search regex highlighting on top of existing syntax-highlighted spans.
+/// Splits spans at match boundaries and applies a yellow background to matched text.
+fn apply_search_highlight(spans: Vec<Span<'static>>, regex: &Regex) -> Vec<Span<'static>> {
+    let mut result: Vec<Span<'static>> = Vec::new();
+    for span in spans {
+        let text = span.content.to_string();
+        let base_style = span.style;
+        let mut last_end = 0;
+        let mut had_match = false;
+        for m in regex.find_iter(&text) {
+            had_match = true;
+            if m.start() > last_end {
+                result.push(Span::styled(
+                    text[last_end..m.start()].to_string(),
+                    base_style,
+                ));
+            }
+            result.push(Span::styled(
+                m.as_str().to_string(),
+                base_style.bg(Color::Yellow).fg(Color::Black),
+            ));
+            last_end = m.end();
+        }
+        if had_match && last_end < text.len() {
+            result.push(Span::styled(text[last_end..].to_string(), base_style));
+        } else if !had_match {
+            result.push(Span::styled(text, base_style));
+        }
+    }
+    result
+}
+
+/// Apply horizontal scroll offset to content string
+fn apply_horizontal_scroll(content: &str, offset: usize) -> String {
+    if offset == 0 {
+        return content.to_string();
+    }
+    let chars: Vec<char> = content.chars().collect();
+    if offset >= chars.len() {
+        return String::new();
+    }
+    chars[offset..].iter().collect()
+}
+
 fn render_list_item(
     entry: &DisplayEntry,
-    _regex: Option<&Regex>,
+    search_regex: Option<&Regex>,
     is_match: bool,
     is_bookmarked: bool,
     file_color: Color,
     display_index: Option<usize>,
+    horizontal_scroll: usize,
+    wrap_lines: bool,
+    available_width: usize,
 ) -> ListItem<'static> {
     let line_idx = if let Some(n) = display_index {
         format!("{:>5} ", n)
@@ -55,7 +102,8 @@ fn render_list_item(
     let marker = if is_match { "●" } else { " " };
     match entry {
         DisplayEntry::Normal(log) => {
-            let preview: String = log.content.chars().take(100).collect();
+            // No hard truncation - use full content
+            let content = &log.content;
             let mut spans: Vec<Span<'static>> = vec![
                 Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
                 Span::styled("█ ", Style::default().fg(file_color)),
@@ -78,11 +126,43 @@ fn render_list_item(
                 ),
                 Span::raw(" "),
             ]);
-            let highlighted = highlight_content_default(&preview);
-            for span in highlighted.spans {
-                let owned_span = Span::styled(span.content.to_string(), span.style);
-                spans.push(owned_span);
+
+            // Calculate prefix width to know how much space is left for content
+            // Approximately: line_idx(6) + "█ "(2) + bookmark(1) + marker(1) + timestamp(9) + " "(1) + delta(~12) + level(7) + " "(1) = ~40 chars
+            let prefix_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+
+            // Apply horizontal scroll to content if wrap is disabled
+            let display_content = if !wrap_lines && horizontal_scroll > 0 {
+                apply_horizontal_scroll(content, horizontal_scroll)
+            } else {
+                content.to_string()
+            };
+
+            let highlighted = highlight_content_default(&display_content);
+            let mut content_spans: Vec<Span<'static>> = highlighted
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect();
+            // Apply search regex highlighting on top of syntax highlighting
+            if let Some(re) = search_regex {
+                content_spans = apply_search_highlight(content_spans, re);
             }
+
+            // If wrap is enabled and content exceeds available width, truncate visually but show indicator
+            if !wrap_lines {
+                // Truncate content to fit available width
+                let content_width = available_width.saturating_sub(prefix_width);
+                let total_chars: usize = content_spans.iter().map(|s| s.content.chars().count()).sum();
+                if total_chars > content_width {
+                    // Add ellipsis indicator if content is scrolled
+                    if horizontal_scroll > 0 {
+                        spans.insert(spans.len(), Span::styled("…", Style::default().fg(Color::Yellow)));
+                    }
+                }
+            }
+
+            spans.extend(content_spans);
             let style = if is_bookmarked {
                 Style::default().bg(Color::Rgb(40, 40, 60))
             } else {
@@ -288,12 +368,15 @@ fn render_log_list_with_state(
     is_tailing: bool,
     visible_levels: &LevelVisibility,
     filter_tid: &Option<String>,
+    filter_trace: &Option<String>,
     search_regex: &Option<Regex>,
     focus: Focus,
     search_mode: bool,
     files: &[FileInfo],
     is_focus_mode: bool,
     focus_query: &str,
+    horizontal_scroll: usize,
+    wrap_lines: bool,
 ) {
     let tail_indicator = if is_tailing { "[LIVE] " } else { "" };
 
@@ -320,26 +403,36 @@ fn render_log_list_with_state(
             "e=导出 c=复制 Esc=退出",
         )
     } else {
-        let title = match (filter_tid, search_regex) {
-            (Some(tid), Some(_)) => format!(
+        let title = match (filter_tid, filter_trace, search_regex) {
+            (Some(tid), _, Some(_)) => format!(
                 " {}[FILTER: Thread {}] [SEARCH: {} matches] {} ",
                 tail_indicator, tid, match_indices.len(), level_status
             ),
-            (Some(tid), None) => format!(
+            (Some(tid), _, None) => format!(
                 " {}[FILTER: Thread {}] {} ",
                 tail_indicator, tid, level_status
             ),
-            (None, Some(_)) => format!(
+            (None, Some(trace), Some(_)) => format!(
+                " {}[FILTER: Trace {}] [SEARCH: {} matches] {} ",
+                tail_indicator, trace, match_indices.len(), level_status
+            ),
+            (None, Some(trace), None) => format!(
+                " {}[FILTER: Trace {}] {} ",
+                tail_indicator, trace, level_status
+            ),
+            (None, None, Some(_)) => format!(
                 " {}[SEARCH: {} matches] {} ",
                 tail_indicator, match_indices.len(), level_status
             ),
-            (None, None) => format!(
+            (None, None, None) => format!(
                 " {}Logs ({}) {} ",
                 tail_indicator, entries.len(), level_status
             ),
         };
         let title_style = if is_tailing {
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else if filter_trace.is_some() {
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
         } else if filter_tid.is_some() || search_regex.is_some() {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
@@ -381,6 +474,9 @@ fn render_log_list_with_state(
                 bookmarks.contains(&i),
                 file_color,
                 idx,
+                horizontal_scroll,
+                wrap_lines,
+                area.width as usize,
             )
         })
         .collect();
@@ -481,10 +577,13 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &mut App, area: Rect) {
     let is_tailing = app.is_tailing;
     let visible_levels = app.visible_levels.clone();
     let filter_tid = app.filter_tid.clone();
+    let filter_trace = app.filter_trace.clone();
     let search_regex = app.search_regex.clone();
     let focus = app.focus;
     let search_mode = app.search_mode;
     let files = app.files.clone();
+    let horizontal_scroll = app.horizontal_scroll;
+    let wrap_lines = app.wrap_lines;
 
     // Get the list state
     let selected = app.list_state.selected();
@@ -501,12 +600,15 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &mut App, area: Rect) {
         is_tailing,
         &visible_levels,
         &filter_tid,
+        &filter_trace,
         &search_regex,
         focus,
         search_mode,
         &files,
         false,
         "",
+        horizontal_scroll,
+        wrap_lines,
     );
 }
 
@@ -518,6 +620,8 @@ pub fn render_focus_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let focus_query = app.focus_mode.focus_query.clone();
     let visible_levels = app.visible_levels.clone();
     let files = app.files.clone();
+    let horizontal_scroll = app.horizontal_scroll;
+    let wrap_lines = app.wrap_lines;
 
     // Get the list state
     let selected = app.focus_mode.focus_table_state.selected();
@@ -534,12 +638,15 @@ pub fn render_focus_list(frame: &mut Frame, app: &mut App, area: Rect) {
         false, // Not tailing
         &visible_levels,
         &None, // No filter_tid in focus mode
+        &None, // No filter_trace in focus mode
         &None, // No search_regex in focus mode
         Focus::LogList, // Always use log list focus in focus mode
         false, // Not search mode
         &files,
         true, // Is focus mode
         &focus_query,
+        horizontal_scroll,
+        wrap_lines,
     );
 }
 
@@ -737,10 +844,15 @@ e           导出专注视图中的日志
 g/G         顶部/底部         :          跳转到行号
 Tab         切换文件/日志焦点
 
+━━━━━━━━━━━━━━━━━━━━ 水平滚动/换行 ━━━━━━━━━━━━━━━
+h/l         水平左/右滚动     w          切换自动换行
+Shift+H     重置水平滚动
+
 ━━━━━━━━━━━━━━━━━━━━ 搜索过滤 ━━━━━━━━━━━━━━━━━━━━
 /           正则搜索          !term      反向搜索
 Shift+S     高级搜索面板       n/N        下/上一匹配
-t           线程过滤          1/2/3/4    Info/Warn/Error/Debug
+t           线程过滤          Shift+T    链路追踪 (traceId)
+1/2/3/4     Info/Warn/Error/Debug
 Ctrl+S      保存搜索模板 (面板内)
 Ctrl+L      加载搜索模板 (面板内)
 
