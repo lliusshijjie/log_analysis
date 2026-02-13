@@ -60,14 +60,6 @@ cargo run -- file1.log file2.log file3.log
     - **Error Pulse**: Sparkline for recent error frequency trends.
     - **Source Distribution**: Pie-chart style visualization for top 5 log sources.
     - **Trend Histogram**: Real-time minute/hour log volume and error trends.
-- **Trace Filtering**:
-    - **Trigger**: Press `Shift+T` on a log entry to extract correlation IDs (traceId, requestId, UUID, etc.).
-    - **Function**: Filters all logs containing the same correlation ID for request tracing.
-    - **Visual ID**: Magenta title showing the traced ID.
-- **Horizontal Scrolling**:
-    - **Scroll**: Press `h` / `l` to scroll log content left/right (5 characters).
-    - **Reset**: Press `Shift+H` to reset horizontal scroll to start.
-    - **Word Wrap**: Press `w` to toggle word wrap mode.
 - **Error Mini-map**: Right sidebar indicates relative positions of Error logs for quick navigation.
 - **AI Chat Interface (F3)**:
     - Dedicated view for multi-turn AI dialogue.
@@ -92,6 +84,9 @@ cargo run -- file1.log file2.log file3.log
 | `k` / `j` | Nav | Vim-style up/down |
 | `g` / `G` | Nav | Jump to Top / Jump to Bottom |
 | `:` | Nav | **Jump to specific line number** |
+| `h` / `l` | Scroll | Horizontal scroll left/right (5 chars) |
+| `Shift+H` | Scroll | Reset horizontal scroll to start |
+| `w` | Display | **Toggle word wrap mode** |
 | `F1` | View | **Log List View** |
 | `F2` | View | **Dashboard View** |
 | `F3` | View | **AI Chat View** |
@@ -114,6 +109,7 @@ cargo run -- file1.log file2.log file3.log
 | `Shift+S` | Search | **Advanced Search Panel** |
 | `n` / `N` | Search | Next/Previous match |
 | `t` | Filter | Toggle Thread (TID) filtering |
+| `Shift+T` | Filter | **Trace Filtering** - Extract correlation ID and filter |
 | `1/2/3/4` | Filter | Toggle Info/Warn/Error/Debug levels |
 | `m` | Bookmark | Toggle bookmark (Purple 🔖) |
 | `b` / `B` | Bookmark | Next/Previous bookmark |
@@ -121,7 +117,11 @@ cargo run -- file1.log file2.log file3.log
 | `a` | AI | Quick AI diagnosis for selected log |
 | `c` | Export | (Focus View) **Multi-line copy** (supports ranges/lists) |
 | `e` | Export | Export filtered logs to CSV |
+| `E` (Shift+E) | Export | Export filtered logs to JSON |
+| `r` | Export | Export stats report |
+| `R` (Shift+R) | Export | Export AI analysis |
 | `?` | Help | Show help popup |
+| `Esc` | State | Close popup / Clear filters / Cancel input |
 | `q` | System | Quit |
 
 ## 5. AI Diagnosis & Chat
