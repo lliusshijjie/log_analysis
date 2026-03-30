@@ -710,6 +710,9 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 bookmarks.contains(&i),
                 file_color,
                 idx,
+                0,   // horizontal_scroll
+                false, // wrap_lines
+                area.width as usize, // available_width
             )
         })
         .collect();
