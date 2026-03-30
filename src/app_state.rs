@@ -58,11 +58,64 @@ impl FocusModeState {
     }
 }
 
+/// Thread view state for isolated thread logs
+#[derive(Default)]
+pub struct ThreadViewState {
+    /// Isolated thread logs
+    pub thread_logs: Vec<DisplayEntry>,
+    /// Original thread logs before any sub-search
+    pub original_thread_logs: Vec<DisplayEntry>,
+    /// Separate scroll state for thread view
+    pub thread_table_state: ListState,
+    /// Thread ID being displayed
+    pub thread_id: String,
+    /// Zoom level (1 = normal, 2 = zoomed out more)
+    pub zoom_level: u8,
+    /// Copy input for line selection
+    pub copy_input: String,
+}
+
+impl ThreadViewState {
+    pub fn new() -> Self {
+        Self {
+            thread_logs: Vec::new(),
+            original_thread_logs: Vec::new(),
+            thread_table_state: ListState::default(),
+            thread_id: String::new(),
+            zoom_level: 1,
+            copy_input: String::new(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.thread_logs.clear();
+        self.original_thread_logs.clear();
+        self.thread_table_state = ListState::default();
+        self.thread_id.clear();
+        self.zoom_level = 1;
+        self.copy_input.clear();
+    }
+
+    pub fn zoom_in(&mut self) {
+        if self.zoom_level > 1 {
+            self.zoom_level -= 1;
+        }
+    }
+
+    pub fn zoom_out(&mut self) {
+        if self.zoom_level < 5 {
+            self.zoom_level += 1;
+        }
+    }
+}
+
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
     pub filtered_entries: Vec<DisplayEntry>,
+    pub raw_entries: Vec<LogEntry>, // Original unfurled entries for thread view
     pub list_state: ListState,
     pub focus_mode: FocusModeState,
+    pub thread_view: ThreadViewState,
     pub filter_tid: Option<String>,
     pub filter_trace: Option<String>,
     pub correlation_regexes: Vec<Regex>,
@@ -121,6 +174,7 @@ pub struct App {
 impl App {
     pub fn new(
         entries: Vec<DisplayEntry>,
+        raw_entries: Vec<LogEntry>,
         histogram: Vec<(String, u64)>,
         files: Vec<FileInfo>,
         ai_tx: mpsc::Sender<(String, Option<String>)>,
@@ -145,8 +199,10 @@ impl App {
         Self {
             all_entries: entries.clone(),
             filtered_entries: entries,
+            raw_entries,
             list_state,
             focus_mode: FocusModeState::new(),
+            thread_view: ThreadViewState::new(),
             filter_tid: None,
             filter_trace: None,
             correlation_regexes: Vec::new(),
@@ -359,16 +415,10 @@ impl App {
     }
 
     pub fn toggle_thread_filter(&mut self) {
-        if self.filter_tid.is_some() {
-            self.filter_tid = None;
-            self.apply_filter();
-        } else if let Some(tid) = self
-            .selected_entry()
-            .and_then(|e| e.get_tid())
-            .map(String::from)
-        {
-            self.filter_tid = Some(tid);
-            self.apply_filter();
+        if self.is_thread_view() {
+            self.exit_thread_view();
+        } else {
+            self.enter_thread_view();
         }
     }
 
@@ -894,6 +944,157 @@ impl App {
     #[allow(dead_code)]
     pub fn is_focus_mode(&self) -> bool {
         matches!(self.current_view, CurrentView::Focus)
+    }
+
+    /// Check if we're currently in thread view
+    #[allow(dead_code)]
+    pub fn is_thread_view(&self) -> bool {
+        matches!(self.current_view, CurrentView::Thread)
+    }
+
+    /// Enter thread view with logs from the selected thread
+    pub fn enter_thread_view(&mut self) {
+        let tid = match self
+            .selected_entry()
+            .and_then(|e| e.get_tid())
+            .map(String::from)
+        {
+            Some(tid) => tid,
+            None => return,
+        };
+
+        // Filter raw_entries by thread ID and convert to DisplayEntry::Normal
+        let thread_logs: Vec<DisplayEntry> = self
+            .raw_entries
+            .iter()
+            .filter(|log| log.tid == tid)
+            .map(|log| DisplayEntry::Normal(log.clone()))
+            .collect();
+
+        if thread_logs.is_empty() {
+            return;
+        }
+
+        self.thread_view.thread_logs = thread_logs.clone();
+        self.thread_view.original_thread_logs = thread_logs;
+        self.thread_view.thread_id = tid;
+        self.thread_view.thread_table_state = ListState::default();
+        self.thread_view.thread_table_state.select(Some(0));
+        self.thread_view.zoom_level = 1;
+
+        self.current_view = CurrentView::Thread;
+    }
+
+    /// Exit thread view and return to normal log view
+    pub fn exit_thread_view(&mut self) {
+        self.thread_view.reset();
+        self.current_view = CurrentView::Logs;
+    }
+
+    /// Update search within thread view
+    pub fn thread_update_search(&mut self) {
+        if self.search_query.is_empty() {
+            self.thread_view.thread_logs = self.thread_view.original_thread_logs.clone();
+        } else {
+            let negative = self.search_query.starts_with('!');
+            let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
+
+            if let Ok(re) = Regex::new(pattern) {
+                self.thread_view.thread_logs = self
+                    .thread_view
+                    .original_thread_logs
+                    .iter()
+                    .filter(|e| {
+                        let matches = re.is_match(&e.get_searchable_text());
+                        if negative { !matches } else { matches }
+                    })
+                    .cloned()
+                    .collect();
+            }
+        }
+
+        self.thread_view.thread_table_state = ListState::default();
+        if !self.thread_view.thread_logs.is_empty() {
+            self.thread_view.thread_table_state.select(Some(0));
+        }
+    }
+
+    /// Navigation methods for thread view
+    pub fn thread_next(&mut self) {
+        let len = self.thread_view.thread_logs.len();
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .thread_view
+            .thread_table_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
+        self.thread_view.thread_table_state.select(Some(i));
+    }
+
+    pub fn thread_previous(&mut self) {
+        if self.thread_view.thread_logs.is_empty() {
+            return;
+        }
+        let i = self
+            .thread_view
+            .thread_table_state
+            .selected()
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(0);
+        self.thread_view.thread_table_state.select(Some(i));
+    }
+
+    pub fn thread_next_page(&mut self) {
+        let len = self.thread_view.thread_logs.len();
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .thread_view
+            .thread_table_state
+            .selected()
+            .map(|i| i.saturating_add(self.page_size).min(len - 1))
+            .unwrap_or(0);
+        self.thread_view.thread_table_state.select(Some(i));
+    }
+
+    pub fn thread_previous_page(&mut self) {
+        if self.thread_view.thread_logs.is_empty() {
+            return;
+        }
+        let i = self
+            .thread_view
+            .thread_table_state
+            .selected()
+            .map(|i| i.saturating_sub(self.page_size))
+            .unwrap_or(0);
+        self.thread_view.thread_table_state.select(Some(i));
+    }
+
+    pub fn thread_jump_to_top(&mut self) {
+        if !self.thread_view.thread_logs.is_empty() {
+            self.thread_view.thread_table_state.select(Some(0));
+        }
+    }
+
+    pub fn thread_jump_to_bottom(&mut self) {
+        let len = self.thread_view.thread_logs.len();
+        if len > 0 {
+            self.thread_view.thread_table_state.select(Some(len - 1));
+        }
+    }
+
+    /// Zoom in (show fewer lines per entry)
+    pub fn thread_zoom_in(&mut self) {
+        self.thread_view.zoom_in();
+    }
+
+    /// Zoom out (show more lines per entry)
+    pub fn thread_zoom_out(&mut self) {
+        self.thread_view.zoom_out();
     }
 
     /// Get the current entries based on view mode

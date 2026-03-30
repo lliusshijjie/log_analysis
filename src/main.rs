@@ -77,7 +77,7 @@ fn main() -> Result<()> {
     let config = AppConfig::load_from(cli.config.as_deref())?;
 
     // 3. Load and parse log files
-    let (entries, files, histogram, file_paths, re, stats) = load_logs(&cli.files, &config)?;
+    let (entries, raw_entries, files, histogram, file_paths, re, stats) = load_logs(&cli.files, &config)?;
 
     // 4. Setup AI background task
     let rt = tokio::runtime::Runtime::new()?;
@@ -115,6 +115,7 @@ fn main() -> Result<()> {
     let (export_tx, export_rx) = std::sync::mpsc::channel();
     let mut app = App::new(
         entries,
+        raw_entries,
         histogram,
         files.clone(),
         req_tx,
@@ -193,6 +194,7 @@ fn load_logs(
     config: &AppConfig,
 ) -> Result<(
     Vec<models::DisplayEntry>,
+    Vec<models::LogEntry>,
     Vec<FileInfo>,
     Vec<(String, u64)>,
     Vec<PathBuf>,
@@ -262,7 +264,7 @@ fn load_logs(
     calculate_deltas(&mut all_entries);
     let histogram = build_histogram(&all_entries);
     let stats = compute_dashboard_stats(&all_entries);
-    let folded = fold_noise(all_entries, &config.filters);
+    let folded = fold_noise(all_entries.clone(), &config.filters);
 
-    Ok((folded, files, histogram, file_paths, re, stats))
+    Ok((folded, all_entries, files, histogram, file_paths, re, stats))
 }

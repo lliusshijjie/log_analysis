@@ -145,6 +145,7 @@ pub enum CurrentView {
     History,
     Report,
     Focus,
+    Thread,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

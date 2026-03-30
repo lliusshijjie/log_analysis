@@ -650,6 +650,95 @@ pub fn render_focus_list(frame: &mut Frame, app: &mut App, area: Rect) {
     );
 }
 
+/// Render log list in thread view mode
+pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Clone the data we need for rendering
+    let entries = app.thread_view.thread_logs.clone();
+    let bookmarks = app.bookmarks.clone();
+    let thread_id = app.thread_view.thread_id.clone();
+    let zoom_level = app.thread_view.zoom_level;
+    let files = app.files.clone();
+
+    // Get the list state
+    let selected = app.thread_view.thread_table_state.selected();
+
+    // Helper to get file color
+    let get_file_color = |source_id: usize| -> Color {
+        files.iter()
+            .find(|f| f.id == source_id)
+            .map(|f| f.color)
+            .unwrap_or(Color::White)
+    };
+
+    // Title with thread ID and top-right buttons
+    let title = format!(
+        " Thread: {} ({} 条) [Zoom: {}] ",
+        thread_id,
+        entries.len(),
+        zoom_level
+    );
+
+    // Top-right buttons: zoom in, zoom out, close
+    let buttons = Line::from(vec![
+        Span::styled("[", Style::default().fg(Color::DarkGray)),
+        Span::styled("+", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(" Zoom", Style::default().fg(Color::DarkGray)),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        Span::styled("-", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(" Zoom", Style::default().fg(Color::DarkGray)),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        Span::styled("x", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(" Close", Style::default().fg(Color::DarkGray)),
+        Span::styled("]", Style::default().fg(Color::DarkGray)),
+    ]).right_aligned();
+
+    // Help text at bottom
+    let help = "←/→=Page Up/Down  / =Search  Esc=Close  c=Copy  e=Export";
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let file_color = e.get_source_id()
+                .map(|sid| get_file_color(sid))
+                .unwrap_or(Color::White);
+            let idx = Some(i + 1);
+            render_list_item(
+                e,
+                None, // No search regex in thread view initially
+                false, // Not a match
+                bookmarks.contains(&i),
+                file_color,
+                idx,
+            )
+        })
+        .collect();
+
+    let mut list_state = ListState::default();
+    list_state.select(selected);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .title_top(buttons)
+                .title_bottom(Line::from(help).right_aligned())
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(list, area, &mut list_state);
+
+    // Render scrollbar
+    render_focus_scrollbar(frame, area, &list_state, entries.len());
+}
+
 
 // Note: render_error_scrollbar_internal was removed as it's been replaced by render_error_scrollbar_with_state
 

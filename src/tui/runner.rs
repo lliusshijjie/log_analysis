@@ -13,7 +13,7 @@ use super::chat::render_chat_interface;
 use super::components::{
     render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_export_popup,
     render_focus_list, render_help_popup, render_histogram, render_jump_popup,
-    render_log_list_from_app, render_search_bar, render_sidebar,
+    render_log_list_from_app, render_search_bar, render_sidebar, render_thread_list,
 };
 use super::dashboard::{render_dashboard, render_header};
 use super::layout::{centered_rect, create_focus_layout, create_layout};
@@ -76,6 +76,37 @@ fn ui(frame: &mut Frame, app: &mut App) {
                 frame.render_widget(input, popup_area);
                 frame.set_cursor_position((
                     popup_area.x + app.focus_mode.copy_input.len() as u16 + 1,
+                    popup_area.y + 1,
+                ));
+            }
+        }
+        CurrentView::Thread => {
+            // Thread view: full-width layout showing all logs from a thread
+            let thread_layout = create_focus_layout(main_chunks[1], app.search_mode);
+            render_thread_list(frame, app, thread_layout.log_list);
+            if app.search_mode {
+                render_search_bar(frame, app, thread_layout.search_bar);
+            }
+            render_detail_pane(frame, app, thread_layout.detail);
+            if app.input_mode == InputMode::FocusCopyInput {
+                let popup_area = centered_rect(40, 15, frame.area());
+                frame.render_widget(Clear, popup_area);
+                let display_text = if app.thread_view.copy_input.is_empty() {
+                    Span::styled("请输入行号, 如: 1-5, 3, 7-10", Style::default().fg(Color::DarkGray))
+                } else {
+                    Span::raw(app.thread_view.copy_input.clone())
+                };
+                let input = Paragraph::new(Line::from(display_text))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(Color::Cyan))
+                            .title(" 复制行号 (如: 1-5, 3, 7-10) ")
+                            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    );
+                frame.render_widget(input, popup_area);
+                frame.set_cursor_position((
+                    popup_area.x + app.thread_view.copy_input.len() as u16 + 1,
                     popup_area.y + 1,
                 ));
             }
@@ -366,6 +397,10 @@ pub fn run_app(
                             if app.current_view == CurrentView::Focus {
                                 // In focus mode: filter focus_logs
                                 app.focus_update_search();
+                                app.exit_search();
+                            } else if app.current_view == CurrentView::Thread {
+                                // In thread view: filter thread_logs
+                                app.thread_update_search();
                                 app.exit_search();
                             } else if key.modifiers.contains(KeyModifiers::ALT) {
                                 // Alt+Enter: Enter focus mode with current search
@@ -722,6 +757,47 @@ pub fn run_app(
                             }
                             KeyCode::Char('/') => {
                                 // Quick search in focus mode
+                                app.start_search();
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    // Thread View handling
+                    if app.current_view == CurrentView::Thread {
+                        match key.code {
+                            KeyCode::Esc => app.exit_thread_view(),
+                            KeyCode::Up | KeyCode::Char('k') => app.thread_previous(),
+                            KeyCode::Down | KeyCode::Char('j') => app.thread_next(),
+                            KeyCode::Left => app.thread_previous_page(),
+                            KeyCode::Right => app.thread_next_page(),
+                            KeyCode::Char('g') => app.thread_jump_to_top(),
+                            KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.thread_jump_to_bottom()
+                            }
+                            KeyCode::Char('+') | KeyCode::Char('=') => app.thread_zoom_in(),
+                            KeyCode::Char('-') => app.thread_zoom_out(),
+                            KeyCode::Char('c') => {
+                                app.thread_view.copy_input.clear();
+                                app.input_mode = InputMode::FocusCopyInput;
+                            }
+                            KeyCode::Char('e') => {
+                                // Export thread view entries to file
+                                let filename = format!("thread_{}_{}.log",
+                                    app.thread_view.thread_id,
+                                    chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                                let content: String = app.thread_view.thread_logs
+                                    .iter()
+                                    .map(|e| e.get_content())
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                match std::fs::write(&filename, content) {
+                                    Ok(_) => app.status_msg = Some((format!("已导出到 {}", filename), Instant::now())),
+                                    Err(e) => app.status_msg = Some((format!("导出失败: {}", e), Instant::now())),
+                                }
+                            }
+                            KeyCode::Char('/') => {
+                                // Quick search in thread view
                                 app.start_search();
                             }
                             _ => {}
