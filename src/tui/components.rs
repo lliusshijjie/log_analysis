@@ -80,6 +80,20 @@ fn apply_horizontal_scroll(content: &str, offset: usize) -> String {
     chars[offset..].iter().collect()
 }
 
+/// Sanitize control characters for stable terminal rendering.
+/// This keeps parsing/export behavior unchanged because it is display-only.
+fn sanitize_for_tui_display(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    for ch in content.chars() {
+        match ch {
+            '\t' => out.push_str(" "),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn render_list_item(
     entry: &DisplayEntry,
     search_regex: Option<&Regex>,
@@ -103,7 +117,7 @@ fn render_list_item(
     match entry {
         DisplayEntry::Normal(log) => {
             // No hard truncation - use full content
-            let content = &log.content;
+            let content = sanitize_for_tui_display(&log.content);
             let mut spans: Vec<Span<'static>> = vec![
                 Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
                 Span::styled("█ ", Style::default().fg(file_color)),
@@ -133,9 +147,9 @@ fn render_list_item(
 
             // Apply horizontal scroll to content if wrap is disabled
             let display_content = if !wrap_lines && horizontal_scroll > 0 {
-                apply_horizontal_scroll(content, horizontal_scroll)
+                apply_horizontal_scroll(&content, horizontal_scroll)
             } else {
-                content.to_string()
+                content
             };
 
             let highlighted = highlight_content_default(&display_content);
@@ -1216,5 +1230,24 @@ pub fn render_export_popup(frame: &mut Frame, app: &App) {
             frame.render_widget(popup, area);
         }
         ExportState::Idle => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_for_tui_display;
+
+    #[test]
+    fn sanitize_replaces_tab_with_spaces() {
+        let input = "a\tb";
+        let got = sanitize_for_tui_display(input);
+        assert_eq!(got, "a    b");
+    }
+
+    #[test]
+    fn sanitize_replaces_control_chars_with_space() {
+        let input = "a\x00b\x1fc";
+        let got = sanitize_for_tui_display(input);
+        assert_eq!(got, "a b c");
     }
 }
