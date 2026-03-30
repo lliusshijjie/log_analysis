@@ -658,6 +658,8 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let thread_id = app.thread_view.thread_id.clone();
     let zoom_level = app.thread_view.zoom_level;
     let files = app.files.clone();
+    let horizontal_scroll = app.horizontal_scroll;
+    let wrap_lines = app.wrap_lines;
 
     // Get the list state
     let selected = app.thread_view.thread_table_state.selected();
@@ -710,9 +712,9 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 bookmarks.contains(&i),
                 file_color,
                 idx,
-                0,   // horizontal_scroll
-                false, // wrap_lines
-                area.width as usize, // available_width
+                horizontal_scroll,
+                wrap_lines,
+                area.width as usize,
             )
         })
         .collect();
