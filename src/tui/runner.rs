@@ -172,6 +172,7 @@ fn is_movable_popup_active(app: &App) -> bool {
 fn apply_advanced_search(app: &mut App, criteria: &SearchCriteria) -> usize {
     match app.current_view {
         CurrentView::Focus => {
+            app.focus_mode.push_snapshot();
             let base = app.focus_mode.focus_logs.clone();
             app.focus_mode.focus_logs = filter_logs_owned(&base, criteria);
             app.focus_mode.original_focus_logs = app.focus_mode.focus_logs.clone();
@@ -1088,7 +1089,11 @@ pub fn run_app(
                     // Focus Mode handling
                     if app.current_view == CurrentView::Focus {
                         match key.code {
-                            KeyCode::Esc => app.exit_focus_mode(),
+                            KeyCode::Esc => {
+                                if !app.focus_go_back() {
+                                    app.exit_focus_mode();
+                                }
+                            }
                             KeyCode::Up | KeyCode::Char('k') => app.focus_previous(),
                             KeyCode::Down | KeyCode::Char('j') => app.focus_next(),
                             KeyCode::Left => app.focus_previous_page(),

@@ -18,6 +18,13 @@ use crate::report::{ReportCache, ReportPeriod};
 use crate::search::SearchCriteria;
 use crate::search_form::SearchFormState;
 
+/// Snapshot of focus mode state for back-navigation
+pub struct FocusSnapshot {
+    pub focus_logs: Vec<DisplayEntry>,
+    pub original_focus_logs: Vec<DisplayEntry>,
+    pub focus_query: String,
+}
+
 /// Focus mode state for isolated search results
 #[derive(Default)]
 pub struct FocusModeState {
@@ -34,6 +41,8 @@ pub struct FocusModeState {
     /// Current match index in focus mode
     pub focus_current_match: usize,
     pub copy_input: String,
+    /// History stack for browser-like back navigation
+    pub history: Vec<FocusSnapshot>,
 }
 
 impl FocusModeState {
@@ -46,6 +55,7 @@ impl FocusModeState {
             focus_match_indices: Vec::new(),
             focus_current_match: 0,
             copy_input: String::new(),
+            history: Vec::new(),
         }
     }
 
@@ -57,6 +67,34 @@ impl FocusModeState {
         self.focus_match_indices.clear();
         self.focus_current_match = 0;
         self.copy_input.clear();
+        self.history.clear();
+    }
+
+    /// Push current state onto history stack before narrowing down
+    pub fn push_snapshot(&mut self) {
+        self.history.push(FocusSnapshot {
+            focus_logs: self.focus_logs.clone(),
+            original_focus_logs: self.original_focus_logs.clone(),
+            focus_query: self.focus_query.clone(),
+        });
+    }
+
+    /// Pop and restore previous state; returns false if no history (should exit focus)
+    pub fn pop_snapshot(&mut self) -> bool {
+        if let Some(snapshot) = self.history.pop() {
+            self.focus_logs = snapshot.focus_logs;
+            self.original_focus_logs = snapshot.original_focus_logs;
+            self.focus_query = snapshot.focus_query;
+            self.focus_table_state = ListState::default();
+            if !self.focus_logs.is_empty() {
+                self.focus_table_state.select(Some(0));
+            }
+            self.focus_match_indices = (0..self.focus_logs.len()).collect();
+            self.focus_current_match = 0;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -1111,36 +1149,43 @@ impl App {
     /// Update search within focus mode - filters original_focus_logs
     pub fn focus_update_search(&mut self) {
         if self.search_query.is_empty() {
-            // Reset to original logs if search is cleared
-            self.focus_mode.focus_logs = self.focus_mode.original_focus_logs.clone();
-        } else {
-            let negative = self.search_query.starts_with('!');
-            let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
-            
-            if let Ok(re) = Regex::new(pattern) {
-                self.focus_mode.focus_logs = self.focus_mode.original_focus_logs
-                    .iter()
-                    .filter(|e| {
-                        let matches = re.is_match(&e.get_searchable_text());
-                        if negative { !matches } else { matches }
-                    })
-                    .cloned()
-                    .collect();
-            }
+            return;
         }
+
+        // Save current state before narrowing down
+        self.focus_mode.push_snapshot();
+
+        let negative = self.search_query.starts_with('!');
+        let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
         
-        // Update focus query display
-        self.focus_mode.focus_query = if self.search_query.is_empty() {
-            "全部".to_string()
-        } else {
-            self.search_query.clone()
-        };
+        if let Ok(re) = Regex::new(pattern) {
+            let filtered: Vec<DisplayEntry> = self.focus_mode.original_focus_logs
+                .iter()
+                .filter(|e| {
+                    let matches = re.is_match(&e.get_searchable_text());
+                    if negative { !matches } else { matches }
+                })
+                .cloned()
+                .collect();
+            self.focus_mode.focus_logs = filtered;
+        }
+
+        // The new filtered set becomes the base for further sub-searches
+        self.focus_mode.original_focus_logs = self.focus_mode.focus_logs.clone();
+        self.focus_mode.focus_query = self.search_query.clone();
 
         // Reset selection
         self.focus_mode.focus_table_state = ListState::default();
         if !self.focus_mode.focus_logs.is_empty() {
             self.focus_mode.focus_table_state.select(Some(0));
         }
+        self.focus_mode.focus_match_indices = (0..self.focus_mode.focus_logs.len()).collect();
+        self.focus_mode.focus_current_match = 0;
+    }
+
+    /// Go back one level in focus mode history; returns false if no history left
+    pub fn focus_go_back(&mut self) -> bool {
+        self.focus_mode.pop_snapshot()
     }
 
     /// Exit focus mode and return to normal log view
