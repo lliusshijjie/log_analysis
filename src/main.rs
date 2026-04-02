@@ -256,6 +256,7 @@ fn load_logs(
                 .unwrap_or_else(|| "?".into()),
             color: colors[id % colors.len()],
             enabled: true,
+            marked: false,
         });
         all_entries.extend(entries);
     }

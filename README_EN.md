@@ -31,7 +31,7 @@ cargo run -- file1.log file2.log file3.log
     - **Line Numbering**: Shows sequential 1-based numbering for easy multi-line reference.
     - **Visual ID**: Cyan border and title displaying `🔍 FOCUS: query`.
     - **Actions**:
-        - **Multi-line Copy (`c`)**: Supports ranges (`1-5`), lists (`1,3,5`), or mixed input.
+        - **Multi-line Copy (`c`)**: Supports ranges (`1-5`), lists (`1,3,5`), or mixed input. Use `*` / `a` / `all` to copy all lines at once.
         - **Sub-search (`/`)**: Further filter results within focus view.
         - **Export (`e`)**: Export focus view logs.
         - **Exit**: Press `Esc` to return to normal view.
@@ -49,9 +49,27 @@ cargo run -- file1.log file2.log file3.log
 - **Quick Jump**: Direct jump by line number or top/bottom navigation.
 - **Live Tailing**: `tail -f` like real-time monitoring. Automatically detects and incremental loads new lines.
 - **Noise Folding**: Merges continuous USB polling, thread cleaning, or duplicate logs to improve readability.
+- **File Solo Mode**:
+    - **Trigger**: Press `Tab` to switch to file list focus, use `↑/↓` to select a file.
+    - **Workflow**: Press `Enter` once to mark the file (`[●]` indicator), press `Enter` again to enter Solo mode.
+    - **Solo Mode**: Only shows logs from the selected file, auto-switches focus to log list.
+    - **Visual**: Selected file shows `[●]` indicator.
+- **Thread View**:
+    - **Trigger**: Press `t` in log list view.
+    - **Function**: Opens an isolated full-screen view containing all logs from the selected thread.
+    - **Actions**:
+        - `←` / `→` page navigation, `/` quick sub-search, `Shift+S` advanced search in thread view.
+        - `c` multi-line copy (supports `*` / `a` / `all` for copy-all), `e` export, `Esc` close.
 - **Advanced Search**:
     - **Complex Filtering**: `Shift+S` opens a panel for time range, regex content, source file, and log level combinations.
     - **Relative Time**: Supports `-1h`, `-30m`, `-2d`, etc.
+    - **Fast Actions**: `Ctrl+Enter` to apply immediately, `Ctrl+R` to clear all form inputs.
+    - **Validation**: Explicit errors for invalid time formats, start time later than end time, and invalid regex.
+    - **Persistent Indicator**: Active advanced filters are shown in title as `[ADV: ...]`; clear with `Ctrl+K`.
+    - **Result Popup**: Submitting advanced search in main log view opens a floating result popup (1-based line numbering) with `↑↓` navigation, `←→` paging, `/` search, `c` copy, `e` export, and `Esc` to close. The popup is draggable via `Alt+Arrow` keys and does not block the main view.
+- **Movable Popups**:
+    - Works for advanced search panel, advanced search result popup, template save/load dialogs, and focus/thread copy dialogs.
+    - Use `Alt+←/→/↑/↓` to move popup position and `Ctrl+0` to recenter.
 - **Performance Profiling**:
     - **Delta Time**: Calculates time difference between logs in the same thread.
     - **Latency Highlighting**: Yellow `[+100ms]` for >100ms, Red `[SLOW]` for >1s.
@@ -105,17 +123,25 @@ cargo run -- file1.log file2.log file3.log
 | `Ctrl+C` | Report | Copy report to clipboard |
 | `Ctrl+S` | Report | Save report as .md |
 | `Space` | File | Toggle file enabled state |
-| `/` | Search | Quick regex search |
+| `Tab` | File | Switch to file list focus |
+| `Enter` | File | (File list) **First press** mark file `[●]` / **Second press** enter Solo mode and auto-switch focus to log list |
+| `/` | Search | Quick regex search (Esc=clear highlights, Enter=apply) |
 | `Shift+S` | Search | **Advanced Search Panel** |
-| `n` / `N` | Search | Next/Previous match |
-| `t` | Filter | Toggle Thread (TID) filtering |
+| `Ctrl+Enter` | Search | (Advanced Search) apply filter immediately |
+| `Ctrl+R` | Search | (Advanced Search) clear all form inputs |
+| `Ctrl+K` | Search | (Main log view) clear active advanced filter `[ADV]` |
+| `Alt+←/→/↑/↓` | Popup | Move active popup window (faster step) |
+| `Ctrl+0` | Popup | Recenter popup window |
+| `n` / `N` | Search | Next/Previous match (first match auto-selected after Enter) |
+| `t` | Thread | Open/Close thread view for selected log |
+| `Shift+S` | Thread | Open advanced search in thread view |
 | `Shift+T` | Filter | **Trace Filtering** - Extract correlation ID and filter |
 | `1/2/3/4` | Filter | Toggle Info/Warn/Error/Debug levels |
 | `m` | Bookmark | Toggle bookmark (Purple 🔖) |
 | `b` / `B` | Bookmark | Next/Previous bookmark |
 | `f` | Tail | **Toggle Live Tailing** (Green `[LIVE]`) |
 | `a` | AI | Quick AI diagnosis for selected log |
-| `c` | Export | (Focus View) **Multi-line copy** (supports ranges/lists) |
+| `c` | Export | (Focus/Thread View) **Multi-line copy** (`*` / `a` / `all` supported) |
 | `e` | Export | Export filtered logs to CSV |
 | `E` (Shift+E) | Export | Export filtered logs to JSON |
 | `r` | Export | Export stats report |

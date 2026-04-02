@@ -12,7 +12,7 @@ use ratatui::{
 use crate::app_state::App;
 use crate::search::LogLevel;
 use crate::search_form::{FormField, TemplateMode};
-use crate::tui::layout::centered_rect;
+use crate::tui::layout::centered_rect_with_offset;
 
 /// Render the advanced search modal
 pub fn render_search_modal(frame: &mut Frame, app: &App) {
@@ -36,7 +36,13 @@ pub fn render_search_modal(frame: &mut Frame, app: &App) {
     }
 
     // Modal dimensions: 65% width, 60% height, centered
-    let area = centered_rect(65, 60, frame.area());
+    let area = centered_rect_with_offset(
+        65,
+        60,
+        frame.area(),
+        app.popup_offset_x,
+        app.popup_offset_y,
+    );
 
     // Clear background and draw outer border
     frame.render_widget(Clear, area);
@@ -50,9 +56,11 @@ pub fn render_search_modal(frame: &mut Frame, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )
         .title_bottom(
-            Line::from(" Tab=切换 | Enter=确认 | Esc=取消 | Ctrl+S=保存模板 | Ctrl+L=加载模板 ")
-                .fg(Color::DarkGray)
-                .right_aligned(),
+            Line::from(
+                " Tab/↑↓=切换 | Enter=下一项 | Ctrl+Enter=搜索 | Ctrl+R=清空 | Ctrl+S/ Ctrl+L=模板 | Alt+方向键移动 | Ctrl+0复位 | Esc=取消 ",
+            )
+            .fg(Color::DarkGray)
+            .right_aligned(),
         )
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -291,7 +299,13 @@ fn render_submit_button(frame: &mut Frame, area: Rect, is_focused: bool) {
 
 /// Render the save template dialog
 fn render_save_template_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect(50, 25, frame.area());
+    let area = centered_rect_with_offset(
+        50,
+        25,
+        frame.area(),
+        app.popup_offset_x,
+        app.popup_offset_y,
+    );
     frame.render_widget(Clear, area);
 
     let block = Block::default()
@@ -350,7 +364,13 @@ fn render_save_template_dialog(frame: &mut Frame, app: &App) {
 
 /// Render the load template dialog
 fn render_load_template_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect(50, 50, frame.area());
+    let area = centered_rect_with_offset(
+        50,
+        50,
+        frame.area(),
+        app.popup_offset_x,
+        app.popup_offset_y,
+    );
     frame.render_widget(Clear, area);
 
     let form = &app.search_form;

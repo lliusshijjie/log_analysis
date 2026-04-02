@@ -11,12 +11,13 @@ use regex::Regex;
 
 use super::chat::render_chat_interface;
 use super::components::{
-    render_ai_popup, render_ai_prompt_popup, render_detail_pane, render_export_popup,
-    render_focus_list, render_help_popup, render_histogram, render_jump_popup,
-    render_log_list_from_app, render_search_bar, render_sidebar, render_thread_list,
+    render_adv_result_popup, render_ai_popup, render_ai_prompt_popup, render_detail_pane,
+    render_export_popup, render_focus_list, render_help_popup, render_histogram,
+    render_jump_popup, render_log_list_from_app, render_search_bar, render_sidebar,
+    render_thread_list,
 };
 use super::dashboard::{render_dashboard, render_header};
-use super::layout::{centered_rect, create_focus_layout, create_layout};
+use super::layout::{centered_rect_with_offset, create_focus_layout, create_layout};
 use super::search_modal::render_search_modal;
 use crate::app_state::App;
 use crate::filtering::filter_logs_owned;
@@ -25,9 +26,188 @@ use crate::models::{
     AiState, CurrentView, DisplayEntry, ExportResult, ExportState, ExportType, Focus, InputMode,
 };
 use crate::search::{LogLevel, SearchCriteria};
-use crate::search_form::{FormField, TemplateMode};
+use crate::search_form::{FormField, SearchFormState, TemplateMode};
 use crate::templates::{get_template, get_template_names, save_template};
 use crate::time_parser::parse_user_time;
+
+fn parse_copy_indices(input: &str, total: usize) -> Option<Vec<usize>> {
+    if total == 0 {
+        return None;
+    }
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = trimmed.to_ascii_lowercase();
+    if matches!(normalized.as_str(), "*" | "a" | "all") {
+        return Some((1..=total).collect());
+    }
+
+    let mut indices: Vec<usize> = Vec::new();
+    for part in trimmed.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some((a, b)) = part.split_once('-') {
+            if let (Ok(start), Ok(end)) = (a.trim().parse::<usize>(), b.trim().parse::<usize>()) {
+                if start <= end {
+                    for i in start..=end {
+                        indices.push(i);
+                    }
+                } else {
+                    for i in end..=start {
+                        indices.push(i);
+                    }
+                }
+            }
+        } else if let Ok(n) = part.parse::<usize>() {
+            indices.push(n);
+        }
+    }
+
+    indices.sort_unstable();
+    indices.dedup();
+    indices.retain(|&i| i >= 1 && i <= total);
+    if indices.is_empty() {
+        None
+    } else {
+        Some(indices)
+    }
+}
+
+fn build_copy_text(entries: &[DisplayEntry], indices: &[usize]) -> String {
+    indices
+        .iter()
+        .map(|&i| entries[i - 1].get_content())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_advanced_search_criteria(form: &SearchFormState) -> std::result::Result<SearchCriteria, String> {
+    let mut criteria = SearchCriteria::default();
+
+    let start_raw = form.start_time_input.trim();
+    if !start_raw.is_empty() {
+        let start = parse_user_time(start_raw)
+            .ok_or_else(|| format!("无效的开始时间: {}", start_raw))?;
+        criteria.start_time = Some(start);
+    }
+
+    let end_raw = form.end_time_input.trim();
+    if !end_raw.is_empty() {
+        let end = parse_user_time(end_raw)
+            .ok_or_else(|| format!("无效的结束时间: {}", end_raw))?;
+        criteria.end_time = Some(end);
+    }
+
+    if let (Some(start), Some(end)) = (criteria.start_time, criteria.end_time) {
+        if start > end {
+            return Err("开始时间不能晚于结束时间".to_string());
+        }
+    }
+
+    let content_raw = form.content_input.trim();
+    if !content_raw.is_empty() {
+        let normalized = if let Some(stripped) = content_raw.strip_prefix('/') {
+            stripped
+        } else {
+            content_raw
+        };
+        if normalized.is_empty() {
+            return Err("内容正则不能为空".to_string());
+        }
+        Regex::new(normalized).map_err(|e| format!("无效的内容正则: {}", e))?;
+        criteria.content_regex = Some(normalized.to_string());
+    }
+
+    let source_raw = form.source_input.trim();
+    if !source_raw.is_empty() {
+        criteria.source_file = Some(source_raw.to_string());
+    }
+
+    criteria.levels = form.selected_levels.iter().cloned().collect();
+    Ok(criteria)
+}
+
+fn build_advanced_search_summary(criteria: &SearchCriteria) -> Option<String> {
+    if criteria.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(start) = criteria.start_time {
+        parts.push(format!("start>={}", start.format("%m-%d %H:%M")));
+    }
+    if let Some(end) = criteria.end_time {
+        parts.push(format!("end<={}", end.format("%m-%d %H:%M")));
+    }
+    if let Some(pattern) = &criteria.content_regex {
+        parts.push(format!("re={}", pattern));
+    }
+    if let Some(source) = &criteria.source_file {
+        parts.push(format!("src~{}", source));
+    }
+    if !criteria.levels.is_empty() {
+        let levels = criteria
+            .levels
+            .iter()
+            .map(|lv| match lv {
+                LogLevel::Debug => "D",
+                LogLevel::Info => "I",
+                LogLevel::Warn => "W",
+                LogLevel::Error => "E",
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        parts.push(format!("lvl={}", levels));
+    }
+    Some(parts.join(" | "))
+}
+
+fn is_movable_popup_active(app: &App) -> bool {
+    app.search_form.is_open || app.input_mode == InputMode::FocusCopyInput || app.adv_result_popup.is_open
+}
+
+fn apply_advanced_search(app: &mut App, criteria: &SearchCriteria) -> usize {
+    match app.current_view {
+        CurrentView::Focus => {
+            let base = app.focus_mode.focus_logs.clone();
+            app.focus_mode.focus_logs = filter_logs_owned(&base, criteria);
+            app.focus_mode.original_focus_logs = app.focus_mode.focus_logs.clone();
+            app.focus_mode.focus_table_state.select(if app.focus_mode.focus_logs.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
+            app.focus_mode.focus_logs.len()
+        }
+        CurrentView::Thread => {
+            let base = app.thread_view.thread_logs.clone();
+            app.thread_view.thread_logs = filter_logs_owned(&base, criteria);
+            app.thread_view.original_thread_logs = app.thread_view.thread_logs.clone();
+            app.thread_view.thread_table_state.select(if app.thread_view.thread_logs.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
+            app.thread_view.thread_logs.len()
+        }
+        _ => {
+            let results = filter_logs_owned(&app.filtered_entries, criteria);
+            let summary = build_advanced_search_summary(criteria)
+                .unwrap_or_else(|| "高级搜索".to_string());
+            let title = format!("高级搜索: {}", summary);
+            let count = results.len();
+            if count > 0 {
+                app.adv_result_popup.open(results, title);
+            } else {
+                app.status_msg = Some(("高级搜索无匹配结果".into(), Instant::now()));
+            }
+            count
+        }
+    }
+}
 
 
 fn ui(frame: &mut Frame, app: &mut App) {
@@ -58,10 +238,16 @@ fn ui(frame: &mut Frame, app: &mut App) {
             }
             render_detail_pane(frame, app, focus_layout.detail);
             if app.input_mode == InputMode::FocusCopyInput {
-                let popup_area = centered_rect(40, 15, frame.area());
+                let popup_area = centered_rect_with_offset(
+                    40,
+                    15,
+                    frame.area(),
+                    app.popup_offset_x,
+                    app.popup_offset_y,
+                );
                 frame.render_widget(Clear, popup_area);
                 let display_text = if app.focus_mode.copy_input.is_empty() {
-                    Span::styled("请输入行号, 如: 1-5, 3, 7-10", Style::default().fg(Color::DarkGray))
+                    Span::styled("请输入行号, 如: 1-5, 3, 7-10, *", Style::default().fg(Color::DarkGray))
                 } else {
                     Span::raw(app.focus_mode.copy_input.clone())
                 };
@@ -70,7 +256,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(Color::Cyan))
-                            .title(" 复制行号 (如: 1-5, 3, 7-10) ")
+                            .title(" 复制行号 (Alt+方向键移动 | Ctrl+0复位) ")
                             .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                     );
                 frame.render_widget(input, popup_area);
@@ -89,10 +275,16 @@ fn ui(frame: &mut Frame, app: &mut App) {
             }
             render_detail_pane(frame, app, thread_layout.detail);
             if app.input_mode == InputMode::FocusCopyInput {
-                let popup_area = centered_rect(40, 15, frame.area());
+                let popup_area = centered_rect_with_offset(
+                    40,
+                    15,
+                    frame.area(),
+                    app.popup_offset_x,
+                    app.popup_offset_y,
+                );
                 frame.render_widget(Clear, popup_area);
                 let display_text = if app.thread_view.copy_input.is_empty() {
-                    Span::styled("请输入行号, 如: 1-5, 3, 7-10", Style::default().fg(Color::DarkGray))
+                    Span::styled("请输入行号, 如: 1-5, 3, 7-10, *", Style::default().fg(Color::DarkGray))
                 } else {
                     Span::raw(app.thread_view.copy_input.clone())
                 };
@@ -101,7 +293,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(Color::Cyan))
-                            .title(" 复制行号 (如: 1-5, 3, 7-10) ")
+                            .title(" 复制行号 (Alt+方向键移动 | Ctrl+0复位) ")
                             .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                     );
                 frame.render_widget(input, popup_area);
@@ -131,6 +323,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_jump_popup(frame, app);
     render_ai_prompt_popup(frame, app);
     render_export_popup(frame, app);
+    render_adv_result_popup(frame, app);
     render_search_modal(frame, app);
 }
 
@@ -215,6 +408,36 @@ pub fn run_app(
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
                     continue;
+                }
+
+                if is_movable_popup_active(app) {
+                    if key.modifiers.contains(KeyModifiers::ALT) {
+                        match key.code {
+                            KeyCode::Left => {
+                                app.move_popup(-8, 0);
+                                continue;
+                            }
+                            KeyCode::Right => {
+                                app.move_popup(8, 0);
+                                continue;
+                            }
+                            KeyCode::Up => {
+                                app.move_popup(0, -2);
+                                continue;
+                            }
+                            KeyCode::Down => {
+                                app.move_popup(0, 2);
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && matches!(key.code, KeyCode::Char('0'))
+                    {
+                        app.reset_popup_position();
+                        continue;
+                    }
                 }
 
                 if matches!(app.ai_state, AiState::Completed(_) | AiState::Error(_)) {
@@ -340,49 +563,215 @@ pub fn run_app(
                 if app.input_mode == InputMode::FocusCopyInput {
                     match key.code {
                         KeyCode::Esc => {
-                            app.focus_mode.copy_input.clear();
+                            if app.current_view == CurrentView::Thread {
+                                app.thread_view.copy_input.clear();
+                            } else {
+                                app.focus_mode.copy_input.clear();
+                            }
                             app.input_mode = InputMode::Normal;
                         }
                         KeyCode::Enter => {
-                            let input = app.focus_mode.copy_input.clone();
-                            let mut indices: Vec<usize> = Vec::new();
-                            for part in input.split(',') {
-                                let part = part.trim();
-                                if let Some((a, b)) = part.split_once('-') {
-                                    if let (Ok(start), Ok(end)) = (a.trim().parse::<usize>(), b.trim().parse::<usize>()) {
-                                        for i in start..=end {
-                                            indices.push(i);
-                                        }
-                                    }
-                                } else if let Ok(n) = part.parse::<usize>() {
-                                    indices.push(n);
-                                }
-                            }
-                            indices.sort();
-                            indices.dedup();
-                            let total = app.focus_mode.focus_logs.len();
-                            let text: String = indices.iter()
-                                .filter(|&&i| i >= 1 && i <= total)
-                                .map(|&i| app.focus_mode.focus_logs[i - 1].get_content())
-                                .collect::<Vec<_>>()
-                                .join("\n");
+                            let (input, entries): (String, &[DisplayEntry]) = if app.current_view == CurrentView::Thread {
+                                (app.thread_view.copy_input.clone(), &app.thread_view.thread_logs)
+                            } else {
+                                (app.focus_mode.copy_input.clone(), &app.focus_mode.focus_logs)
+                            };
+
+                            let indices = parse_copy_indices(&input, entries.len());
+                            let text = indices
+                                .as_ref()
+                                .map(|v| build_copy_text(entries, v))
+                                .unwrap_or_default();
                             if !text.is_empty() {
                                 if let Some(ref mut clipboard) = app.clipboard {
                                     if clipboard.set_text(text).is_ok() {
-                                        app.status_msg = Some((format!("已复制 {} 行", indices.len()), Instant::now()));
+                                        app.status_msg = Some((
+                                            format!("已复制 {} 行", indices.as_ref().map_or(0, |v| v.len())),
+                                            Instant::now(),
+                                        ));
                                     }
                                 }
                             } else {
                                 app.status_msg = Some(("无效的行号".into(), Instant::now()));
                             }
-                            app.focus_mode.copy_input.clear();
+                            if app.current_view == CurrentView::Thread {
+                                app.thread_view.copy_input.clear();
+                            } else {
+                                app.focus_mode.copy_input.clear();
+                            }
                             app.input_mode = InputMode::Normal;
                         }
                         KeyCode::Backspace => {
-                            app.focus_mode.copy_input.pop();
+                            if app.current_view == CurrentView::Thread {
+                                app.thread_view.copy_input.pop();
+                            } else {
+                                app.focus_mode.copy_input.pop();
+                            }
                         }
-                        KeyCode::Char(c) if c.is_ascii_digit() || c == '-' || c == ',' => {
-                            app.focus_mode.copy_input.push(c);
+                        KeyCode::Char(c)
+                            if c.is_ascii_digit()
+                                || c == '-'
+                                || c == ','
+                                || c == '*'
+                                || c == 'a'
+                                || c == 'A'
+                                || c == 'l'
+                                || c == 'L' =>
+                        {
+                            if app.current_view == CurrentView::Thread {
+                                app.thread_view.copy_input.push(c);
+                            } else {
+                                app.focus_mode.copy_input.push(c);
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // Advanced search result popup handling
+                if app.adv_result_popup.is_open {
+                    if app.adv_result_popup.copy_mode {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.adv_result_popup.copy_mode = false;
+                                app.adv_result_popup.copy_input.clear();
+                                app.adv_result_popup.copy_feedback = None;
+                            }
+                            KeyCode::Enter => {
+                                let total = app.adv_result_popup.logs.len();
+                                let input = app.adv_result_popup.copy_input.clone();
+                                if let Some(indices) = parse_copy_indices(&input, total) {
+                                    let text: String = indices.iter()
+                                        .filter_map(|&i| app.adv_result_popup.logs.get(i - 1))
+                                        .map(|e| e.get_content())
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    if let Some(ref mut clip) = app.clipboard {
+                                        match clip.set_text(&text) {
+                                            Ok(_) => {
+                                                let msg = format!("已复制 {} 行到剪贴板", indices.len());
+                                                app.status_msg = Some((msg.clone(), Instant::now()));
+                                                app.adv_result_popup.copy_feedback = Some(format!(
+                                                    "{}，可继续输入并回车再次复制",
+                                                    msg
+                                                ));
+                                            }
+                                            Err(e) => app.status_msg = Some((
+                                                format!("复制失败: {}", e),
+                                                Instant::now(),
+                                            )),
+                                        }
+                                    } else {
+                                        app.status_msg = Some((
+                                            "复制失败: 系统剪贴板不可用".into(),
+                                            Instant::now(),
+                                        ));
+                                        app.adv_result_popup.copy_feedback =
+                                            Some("复制失败: 系统剪贴板不可用".into());
+                                    }
+                                    app.adv_result_popup.copy_input.clear();
+                                } else {
+                                    app.status_msg = Some(("无效的行号输入".into(), Instant::now()));
+                                    app.adv_result_popup.copy_feedback =
+                                        Some("输入无效，请使用 1-5, 3, 7-10, * / a / all".into());
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                app.adv_result_popup.copy_input.pop();
+                                app.adv_result_popup.copy_feedback = None;
+                            }
+                            KeyCode::Char(c)
+                                if c.is_ascii_digit() || c == '-' || c == ','
+                                || c == '*' || c == 'a' || c == 'A'
+                                || c == 'l' || c == 'L' =>
+                            {
+                                app.adv_result_popup.copy_input.push(c);
+                                app.adv_result_popup.copy_feedback = None;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    if app.adv_result_popup.search_mode {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.adv_result_popup.search_mode = false;
+                                app.adv_result_popup.search_query.clear();
+                                app.adv_result_popup.search_regex = None;
+                            }
+                            KeyCode::Enter => {
+                                let q = app.adv_result_popup.search_query.clone();
+                                if q.is_empty() {
+                                    app.adv_result_popup.search_regex = None;
+                                    app.adv_result_popup.search_mode = false;
+                                    app.adv_result_popup.match_indices.clear();
+                                } else {
+                                    match Regex::new(&q) {
+                                        Ok(re) => {
+                                            app.adv_result_popup.search_regex = Some(re);
+                                            app.adv_result_popup.search_mode = false;
+                                            app.adv_result_popup.update_match_indices();
+                                        }
+                                        Err(e) => {
+                                            app.status_msg = Some((
+                                                format!("搜索正则无效: {}", e),
+                                                Instant::now(),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Backspace => { app.adv_result_popup.search_query.pop(); }
+                            KeyCode::Char(c) => { app.adv_result_popup.search_query.push(c); }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    match key.code {
+                        KeyCode::Esc => app.adv_result_popup.close(),
+                        KeyCode::Up | KeyCode::Char('k') => app.adv_result_popup.previous(),
+                        KeyCode::Down | KeyCode::Char('j') => app.adv_result_popup.next(),
+                        KeyCode::Left => app.adv_result_popup.previous_page(app.page_size),
+                        KeyCode::Right => app.adv_result_popup.next_page(app.page_size),
+                        KeyCode::Char('g') => app.adv_result_popup.jump_to_top(),
+                        KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            app.adv_result_popup.jump_to_bottom()
+                        }
+                        KeyCode::Char('/') => {
+                            app.adv_result_popup.search_mode = true;
+                            app.adv_result_popup.search_query.clear();
+                        }
+                        KeyCode::Char('n') => app.adv_result_popup.next_match(),
+                        KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            app.adv_result_popup.prev_match()
+                        }
+                        KeyCode::Char('c') => {
+                            app.adv_result_popup.copy_mode = true;
+                            app.adv_result_popup.copy_input.clear();
+                            app.adv_result_popup.copy_feedback =
+                                Some("输入行号后按 Enter 复制，Esc 返回".into());
+                        }
+                        KeyCode::Char('e') => {
+                            let filename = format!(
+                                "adv_search_{}.log",
+                                chrono::Local::now().format("%Y%m%d_%H%M%S")
+                            );
+                            let content: String = app.adv_result_popup.logs
+                                .iter()
+                                .map(|e| e.get_content())
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            match std::fs::write(&filename, content) {
+                                Ok(_) => app.status_msg = Some((
+                                    format!("已导出到 {}", filename),
+                                    Instant::now(),
+                                )),
+                                Err(e) => app.status_msg = Some((
+                                    format!("导出失败: {}", e),
+                                    Instant::now(),
+                                )),
+                            }
                         }
                         _ => {}
                     }
@@ -391,7 +780,7 @@ pub fn run_app(
 
                 if app.search_mode {
                     match key.code {
-                        KeyCode::Esc => app.exit_search(),
+                        KeyCode::Esc => app.clear_search(),
                         KeyCode::Enter => {
                             let query = app.search_query.clone();
                             if app.current_view == CurrentView::Focus {
@@ -405,10 +794,10 @@ pub fn run_app(
                             } else if key.modifiers.contains(KeyModifiers::ALT) {
                                 // Alt+Enter: Enter focus mode with current search
                                 app.update_search();
-                                app.exit_search();
+                                app.clear_search();
                                 app.enter_focus_mode(query.clone());
                             } else {
-                                // Normal Enter: Apply search and stay in normal mode
+                                // Normal Enter: Apply search (show highlights) and hide input overlay
                                 app.update_search();
                                 app.exit_search();
                             }
@@ -500,6 +889,12 @@ pub fn run_app(
                         KeyCode::Esc => {
                             app.search_form.close();
                         }
+                        KeyCode::Up => {
+                            app.search_form.prev_field();
+                        }
+                        KeyCode::Down => {
+                            app.search_form.next_field();
+                        }
                         KeyCode::Tab => {
                             if key.modifiers.contains(KeyModifiers::SHIFT) {
                                 app.search_form.prev_field();
@@ -511,62 +906,26 @@ pub fn run_app(
                             app.search_form.prev_field();
                         }
                         KeyCode::Enter => {
-                            if app.search_form.focused_field == FormField::SubmitBtn {
-                                // Build SearchCriteria from form
-                                let form = &app.search_form;
-                                let mut criteria = SearchCriteria::default();
-                                
-                                // Parse start time
-                                if !form.start_time_input.is_empty() {
-                                    match parse_user_time(&form.start_time_input) {
-                                        Some(t) => criteria.start_time = Some(t),
-                                        None => {
-                                            app.search_form.set_error(
-                                                format!("无效的开始时间: {}", form.start_time_input)
-                                            );
-                                            continue;
-                                        }
+                            let focused_on_content = app.search_form.focused_field == FormField::Content;
+                            let simple_content_only = focused_on_content
+                                && !app.search_form.content_input.trim().is_empty()
+                                && app.search_form.start_time_input.trim().is_empty()
+                                && app.search_form.end_time_input.trim().is_empty()
+                                && app.search_form.source_input.trim().is_empty()
+                                && app.search_form.selected_levels.is_empty();
+                            let submit_now = app.search_form.focused_field == FormField::SubmitBtn
+                                || key.modifiers.contains(KeyModifiers::CONTROL)
+                                || simple_content_only;
+                            if submit_now {
+                                let criteria = match build_advanced_search_criteria(&app.search_form) {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        app.search_form.set_error(e);
+                                        continue;
                                     }
-                                }
-                                
-                                // Parse end time
-                                if !form.end_time_input.is_empty() {
-                                    match parse_user_time(&form.end_time_input) {
-                                        Some(t) => criteria.end_time = Some(t),
-                                        None => {
-                                            app.search_form.set_error(
-                                                format!("无效的结束时间: {}", form.end_time_input)
-                                            );
-                                            continue;
-                                        }
-                                    }
-                                }
-                                
-                                // Content regex
-                                if !form.content_input.is_empty() {
-                                    criteria.content_regex = Some(form.content_input.clone());
-                                }
-                                
-                                // Source file
-                                if !form.source_input.is_empty() {
-                                    criteria.source_file = Some(form.source_input.clone());
-                                }
-                                
-                                // Levels
-                                criteria.levels = form.selected_levels.iter().cloned().collect();
-                                
-                                // Apply filter
-                                app.filtered_entries = filter_logs_owned(&app.all_entries, &criteria);
-                                app.list_state.select(if app.filtered_entries.is_empty() {
-                                    None
-                                } else {
-                                    Some(0)
-                                });
-                                app.update_search_matches();
-                                
-                                // Close form and show status
+                                };
+                                let count = apply_advanced_search(app, &criteria);
                                 app.search_form.close();
-                                let count = app.filtered_entries.len();
                                 app.status_msg = Some((
                                     format!("高级搜索: {} 条匹配", count),
                                     std::time::Instant::now(),
@@ -589,6 +948,10 @@ pub fn run_app(
                             // Ctrl+L: Load template
                             let names = get_template_names();
                             app.search_form.start_load_template(names);
+                        }
+                        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            // Ctrl+R: Clear form quickly
+                            app.search_form.clear();
                         }
                         KeyCode::Char(c) => {
                             match app.search_form.focused_field {
@@ -800,6 +1163,10 @@ pub fn run_app(
                                 // Quick search in thread view
                                 app.start_search();
                             }
+                            KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                // Open advanced search form in thread view
+                                app.search_form.open();
+                            }
                             _ => {}
                         }
                         continue;
@@ -852,6 +1219,9 @@ pub fn run_app(
                             _ => {}
                         },
                         Focus::LogList => match key.code {
+                            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                app.clear_advanced_search()
+                            }
                             KeyCode::Up | KeyCode::Char('k') => app.previous(),
                             KeyCode::Down | KeyCode::Char('j') => app.next(),
                             KeyCode::Left => app.previous_page(),
@@ -880,9 +1250,15 @@ pub fn run_app(
                                 app.toggle_trace_filter()
                             }
                             KeyCode::Esc => {
-                                app.filter_tid = None;
-                                app.filter_trace = None;
-                                app.apply_filter();
+                                // Clear search highlights if active
+                                if app.search_regex.is_some() {
+                                    app.clear_search();
+                                } else if app.filter_tid.is_some() || app.filter_trace.is_some() {
+                                    // Only clear filters if they exist
+                                    app.filter_tid = None;
+                                    app.filter_trace = None;
+                                    app.apply_filter();
+                                }
                             }
                             KeyCode::Char('c') => app.copy_line(),
                             KeyCode::Char('y') => app.yank_payload(),
@@ -934,5 +1310,66 @@ pub fn run_app(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_advanced_search_criteria, parse_copy_indices};
+    use crate::search_form::SearchFormState;
+
+    #[test]
+    fn parse_copy_indices_supports_all_shortcuts() {
+        assert_eq!(parse_copy_indices("*", 3), Some(vec![1, 2, 3]));
+        assert_eq!(parse_copy_indices("a", 3), Some(vec![1, 2, 3]));
+        assert_eq!(parse_copy_indices("all", 3), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn parse_copy_indices_supports_mixed_ranges() {
+        assert_eq!(
+            parse_copy_indices("1-3,5,7-6,2", 10),
+            Some(vec![1, 2, 3, 5, 6, 7])
+        );
+    }
+
+    #[test]
+    fn parse_copy_indices_rejects_invalid_input() {
+        assert_eq!(parse_copy_indices("", 10), None);
+        assert_eq!(parse_copy_indices("x,y", 10), None);
+        assert_eq!(parse_copy_indices("99", 10), None);
+    }
+
+    #[test]
+    fn advanced_criteria_rejects_invalid_regex() {
+        let mut form = SearchFormState::new();
+        form.content_input = "[".to_string();
+        let result = build_advanced_search_criteria(&form);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn advanced_criteria_rejects_invalid_time_range() {
+        let mut form = SearchFormState::new();
+        form.start_time_input = "2026-03-30 12:00:00".to_string();
+        form.end_time_input = "2026-03-30 10:00:00".to_string();
+        let result = build_advanced_search_criteria(&form);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn advanced_criteria_accepts_slash_prefixed_content() {
+        let mut form = SearchFormState::new();
+        form.content_input = "/error".to_string();
+        let result = build_advanced_search_criteria(&form).unwrap();
+        assert_eq!(result.content_regex.as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn advanced_criteria_rejects_empty_slash_content() {
+        let mut form = SearchFormState::new();
+        form.content_input = "/".to_string();
+        let result = build_advanced_search_criteria(&form);
+        assert!(result.is_err());
     }
 }

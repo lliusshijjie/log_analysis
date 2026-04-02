@@ -8,6 +8,8 @@ pub struct FileInfo {
     pub name: String,
     pub color: Color,
     pub enabled: bool,
+    /// Whether the file is marked with a dot (pending activation)
+    pub marked: bool,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]

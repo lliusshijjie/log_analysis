@@ -86,3 +86,23 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+pub fn centered_rect_with_offset(
+    percent_x: u16,
+    percent_y: u16,
+    r: Rect,
+    offset_x: i16,
+    offset_y: i16,
+) -> Rect {
+    let base = centered_rect(percent_x, percent_y, r);
+
+    let min_x = r.x;
+    let max_x = r.x + r.width.saturating_sub(base.width);
+    let min_y = r.y;
+    let max_y = r.y + r.height.saturating_sub(base.height);
+
+    let moved_x = (base.x as i32 + offset_x as i32).clamp(min_x as i32, max_x as i32) as u16;
+    let moved_y = (base.y as i32 + offset_y as i32).clamp(min_y as i32, max_y as i32) as u16;
+
+    Rect::new(moved_x, moved_y, base.width, base.height)
+}

@@ -8,12 +8,14 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
+use crate::filtering::filter_logs_owned;
 use crate::history::HistoryManager;
 use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
     ExportResult, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
 };
 use crate::report::{ReportCache, ReportPeriod};
+use crate::search::SearchCriteria;
 use crate::search_form::SearchFormState;
 
 /// Focus mode state for isolated search results
@@ -109,6 +111,149 @@ impl ThreadViewState {
     }
 }
 
+/// Floating popup for displaying advanced search results over the main view
+pub struct AdvancedResultPopup {
+    pub is_open: bool,
+    pub logs: Vec<DisplayEntry>,
+    pub table_state: ListState,
+    pub title: String,
+    pub search_mode: bool,
+    pub search_query: String,
+    pub search_regex: Option<Regex>,
+    pub copy_mode: bool,
+    pub copy_input: String,
+    pub copy_feedback: Option<String>,
+    /// Match indices for search navigation within popup
+    pub match_indices: Vec<usize>,
+    pub current_match: usize,
+}
+
+impl Default for AdvancedResultPopup {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            logs: Vec::new(),
+            table_state: ListState::default(),
+            title: String::new(),
+            search_mode: false,
+            search_query: String::new(),
+            search_regex: None,
+            copy_mode: false,
+            copy_input: String::new(),
+            copy_feedback: None,
+            match_indices: Vec::new(),
+            current_match: 0,
+        }
+    }
+}
+
+impl AdvancedResultPopup {
+    pub fn open(&mut self, logs: Vec<DisplayEntry>, title: String) {
+        self.is_open = true;
+        self.logs = logs;
+        self.title = title;
+        self.table_state = ListState::default();
+        if !self.logs.is_empty() {
+            self.table_state.select(Some(0));
+        }
+        self.search_mode = false;
+        self.search_query.clear();
+        self.search_regex = None;
+        self.copy_mode = false;
+        self.copy_input.clear();
+        self.copy_feedback = None;
+        self.match_indices.clear();
+        self.current_match = 0;
+    }
+
+    pub fn close(&mut self) {
+        self.is_open = false;
+        self.logs.clear();
+        self.table_state = ListState::default();
+        self.search_query.clear();
+        self.search_regex = None;
+        self.copy_mode = false;
+        self.copy_input.clear();
+        self.copy_feedback = None;
+        self.match_indices.clear();
+        self.current_match = 0;
+    }
+
+    pub fn next(&mut self) {
+        if self.logs.is_empty() { return; }
+        let i = self.table_state.selected().map_or(0, |i| {
+            if i + 1 >= self.logs.len() { i } else { i + 1 }
+        });
+        self.table_state.select(Some(i));
+    }
+
+    pub fn previous(&mut self) {
+        if self.logs.is_empty() { return; }
+        let i = self.table_state.selected().map_or(0, |i| i.saturating_sub(1));
+        self.table_state.select(Some(i));
+    }
+
+    pub fn next_page(&mut self, page_size: usize) {
+        if self.logs.is_empty() { return; }
+        let i = self.table_state.selected().map_or(0, |i| {
+            (i + page_size).min(self.logs.len() - 1)
+        });
+        self.table_state.select(Some(i));
+    }
+
+    pub fn previous_page(&mut self, page_size: usize) {
+        if self.logs.is_empty() { return; }
+        let i = self.table_state.selected().map_or(0, |i| i.saturating_sub(page_size));
+        self.table_state.select(Some(i));
+    }
+
+    pub fn jump_to_top(&mut self) {
+        if !self.logs.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    pub fn jump_to_bottom(&mut self) {
+        if !self.logs.is_empty() {
+            self.table_state.select(Some(self.logs.len() - 1));
+        }
+    }
+
+    /// Update match indices based on current search_regex
+    pub fn update_match_indices(&mut self) {
+        self.match_indices.clear();
+        if let Some(re) = &self.search_regex {
+            for (i, entry) in self.logs.iter().enumerate() {
+                if re.is_match(&entry.get_searchable_text()) {
+                    self.match_indices.push(i);
+                }
+            }
+        }
+        self.current_match = 0;
+    }
+
+    /// Navigate to next match
+    pub fn next_match(&mut self) {
+        if self.match_indices.is_empty() {
+            return;
+        }
+        self.current_match = (self.current_match + 1) % self.match_indices.len();
+        self.table_state.select(Some(self.match_indices[self.current_match]));
+    }
+
+    /// Navigate to previous match
+    pub fn prev_match(&mut self) {
+        if self.match_indices.is_empty() {
+            return;
+        }
+        self.current_match = self
+            .current_match
+            .checked_sub(1)
+            .unwrap_or(self.match_indices.len() - 1);
+        self.table_state.select(Some(self.match_indices[self.current_match]));
+    }
+}
+
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
     pub filtered_entries: Vec<DisplayEntry>,
@@ -162,6 +307,14 @@ pub struct App {
     pub history: HistoryManager,
     // Advanced search form state
     pub search_form: SearchFormState,
+    // Persistent advanced search filter (normal log view)
+    pub advanced_search_criteria: Option<SearchCriteria>,
+    pub advanced_search_summary: Option<String>,
+    // Advanced search result popup
+    pub adv_result_popup: AdvancedResultPopup,
+    // Shared popup offset for movable floating dialogs
+    pub popup_offset_x: i16,
+    pub popup_offset_y: i16,
     // Report state
     pub report_period: ReportPeriod,
     pub report_content: String,
@@ -246,6 +399,11 @@ impl App {
             export_state: ExportState::Idle,
             history: HistoryManager::new(),
             search_form: SearchFormState::new(),
+            advanced_search_criteria: None,
+            advanced_search_summary: None,
+            adv_result_popup: AdvancedResultPopup::default(),
+            popup_offset_x: 0,
+            popup_offset_y: 0,
             report_period: ReportPeriod::default(),
             report_content: String::new(),
             report_generating: false,
@@ -474,6 +632,9 @@ impl App {
             })
             .map(|(_, e)| e.clone())
             .collect();
+        if let Some(criteria) = &self.advanced_search_criteria {
+            self.filtered_entries = filter_logs_owned(&self.filtered_entries, criteria);
+        }
         self.list_state.select(if self.filtered_entries.is_empty() {
             None
         } else {
@@ -481,6 +642,23 @@ impl App {
         });
         self.update_search_matches();
         self.error_indices = Self::compute_error_indices(&self.filtered_entries);
+    }
+
+    pub fn clear_advanced_search(&mut self) {
+        self.advanced_search_criteria = None;
+        self.advanced_search_summary = None;
+        self.apply_filter();
+        self.status_msg = Some(("已清除高级搜索条件".into(), Instant::now()));
+    }
+
+    pub fn move_popup(&mut self, dx: i16, dy: i16) {
+        self.popup_offset_x = self.popup_offset_x.saturating_add(dx);
+        self.popup_offset_y = self.popup_offset_y.saturating_add(dy);
+    }
+
+    pub fn reset_popup_position(&mut self) {
+        self.popup_offset_x = 0;
+        self.popup_offset_y = 0;
     }
 
     pub fn start_search(&mut self) {
@@ -491,6 +669,13 @@ impl App {
 
     pub fn exit_search(&mut self) {
         self.search_mode = false;
+    }
+
+    /// Clear search results and exit search mode (called on Esc)
+    pub fn clear_search(&mut self) {
+        self.search_mode = false;
+        self.search_regex = None;
+        self.match_indices.clear();
     }
 
     pub fn update_search(&mut self) {
@@ -526,6 +711,13 @@ impl App {
             }
         }
         self.current_match = 0;
+        // Select the first match if there are any matches
+        if !self.match_indices.is_empty() {
+            self.list_state.select(Some(self.match_indices[0]));
+            self.status_msg = Some((format!("{} 个匹配", self.match_indices.len()), Instant::now()));
+        } else {
+            self.status_msg = Some(("No Result".into(), Instant::now()));
+        }
     }
 
     pub fn next_match(&mut self) {
@@ -653,10 +845,27 @@ impl App {
 
     pub fn solo_file(&mut self) {
         if let Some(idx) = self.file_list_state.selected() {
-            for (i, f) in self.files.iter_mut().enumerate() {
-                f.enabled = i == idx;
+            let is_marked = self.files.get(idx).map(|f| f.marked).unwrap_or(false);
+
+            if is_marked {
+                // Second Enter: activate solo mode for the marked file
+                for (i, file) in self.files.iter_mut().enumerate() {
+                    file.enabled = i == idx;
+                    // Keep marked=true to show the dot indicator for solo file
+                }
+                self.apply_filter();
+                // Auto-switch focus to LogList after solo activation
+                self.focus = Focus::LogList;
+            } else {
+                // First Enter: mark the file with a dot
+                // Clear any other marked files first
+                for file in self.files.iter_mut() {
+                    file.marked = false;
+                }
+                if let Some(f) = self.files.get_mut(idx) {
+                    f.marked = true;
+                }
             }
-            self.apply_filter();
         }
     }
 

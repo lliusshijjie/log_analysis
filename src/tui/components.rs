@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::app_state::App;
 use crate::models::{AiState, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility};
-use crate::tui::layout::centered_rect;
+use crate::tui::layout::{centered_rect, centered_rect_with_offset};
 use crate::tui::syntax::highlight_content_default;
 
 fn level_color(level: &str) -> Color {
@@ -86,7 +86,7 @@ fn sanitize_for_tui_display(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     for ch in content.chars() {
         match ch {
-            '\t' => out.push_str(" "),
+            '\t' => out.push_str("    "),
             c if c.is_control() => out.push(' '),
             c => out.push(c),
         }
@@ -345,9 +345,10 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
         .files
         .iter()
         .map(|f| {
-            let mark = if f.enabled { "[x]" } else { "[ ]" };
+            let mark = if f.marked { "[●] " } else { "    " };
+            let mark_color = if f.marked { Color::Cyan } else { Color::DarkGray };
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", mark), Style::default().fg(Color::White)),
+                Span::styled(mark, Style::default().fg(mark_color)),
                 Span::styled(&f.name, Style::default().fg(f.color)),
             ]))
         })
@@ -391,6 +392,7 @@ fn render_log_list_with_state(
     focus_query: &str,
     horizontal_scroll: usize,
     wrap_lines: bool,
+    advanced_search_summary: Option<&str>,
 ) {
     let tail_indicator = if is_tailing { "[LIVE] " } else { "" };
 
@@ -414,10 +416,10 @@ fn render_log_list_with_state(
             focus_title,
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             Style::default().fg(Color::Cyan),
-            "e=导出 c=复制 Esc=退出",
+            "←/→=Page Up/Down  / =Search  Esc=Close  c=Copy  e=Export",
         )
     } else {
-        let title = match (filter_tid, filter_trace, search_regex) {
+        let mut title = match (filter_tid, filter_trace, search_regex) {
             (Some(tid), _, Some(_)) => format!(
                 " {}[FILTER: Thread {}] [SEARCH: {} matches] {} ",
                 tail_indicator, tid, match_indices.len(), level_status
@@ -443,6 +445,16 @@ fn render_log_list_with_state(
                 tail_indicator, entries.len(), level_status
             ),
         };
+        if let Some(summary) = advanced_search_summary {
+            let short = if summary.chars().count() > 56 {
+                let mut s: String = summary.chars().take(56).collect();
+                s.push('…');
+                s
+            } else {
+                summary.to_string()
+            };
+            title.push_str(&format!("[ADV: {}] ", short));
+        }
         let title_style = if is_tailing {
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
         } else if filter_trace.is_some() {
@@ -459,6 +471,8 @@ fn render_log_list_with_state(
         };
         let help = if search_mode {
             "ESC=exit  F6=Focus模式"
+        } else if advanced_search_summary.is_some() {
+            "Tab=switch Space=toggle Enter=solo F6=Focus模式 Ctrl+K=清除高级搜索"
         } else {
             "Tab=switch Space=toggle Enter=solo F6=Focus模式"
         };
@@ -598,6 +612,7 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &mut App, area: Rect) {
     let files = app.files.clone();
     let horizontal_scroll = app.horizontal_scroll;
     let wrap_lines = app.wrap_lines;
+    let advanced_search_summary = app.advanced_search_summary.clone();
 
     // Get the list state
     let selected = app.list_state.selected();
@@ -623,6 +638,7 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &mut App, area: Rect) {
         "",
         horizontal_scroll,
         wrap_lines,
+        advanced_search_summary.as_deref(),
     );
 }
 
@@ -661,6 +677,7 @@ pub fn render_focus_list(frame: &mut Frame, app: &mut App, area: Rect) {
         &focus_query,
         horizontal_scroll,
         wrap_lines,
+        None,
     );
 }
 
@@ -1230,6 +1247,172 @@ pub fn render_export_popup(frame: &mut Frame, app: &App) {
             frame.render_widget(popup, area);
         }
         ExportState::Idle => {}
+    }
+}
+
+/// Render the advanced search result popup (floating over the main view)
+pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
+    let popup = &app.adv_result_popup;
+    if !popup.is_open {
+        return;
+    }
+
+    let area = centered_rect_with_offset(80, 75, frame.area(), app.popup_offset_x, app.popup_offset_y);
+    frame.render_widget(Clear, area);
+
+    let entries = &popup.logs;
+    let selected = popup.table_state.selected();
+    let search_regex = popup.search_regex.as_ref();
+    let files = &app.files;
+    let horizontal_scroll = app.horizontal_scroll;
+    let wrap_lines = app.wrap_lines;
+
+    let get_file_color = |source_id: usize| -> Color {
+        files.iter()
+            .find(|f| f.id == source_id)
+            .map(|f| f.color)
+            .unwrap_or(Color::White)
+    };
+
+    let title = format!(" {} ({} 条) ", popup.title, entries.len());
+
+    // Calculate live match count for search preview
+    let live_match_count = if popup.search_mode && !popup.search_query.is_empty() {
+        popup.search_query.chars().count();
+        Regex::new(&popup.search_query).ok().map(|re| {
+            popup.logs.iter().filter(|e| re.is_match(&e.get_searchable_text())).count()
+        })
+    } else {
+        None
+    };
+
+    let help = if popup.search_mode {
+        if let Some(count) = live_match_count {
+            format!("匹配 {} 条  Enter=应用  Esc=取消  (支持正则)", count)
+        } else {
+            "Enter=应用搜索  Esc=取消搜索  (支持正则)".to_string()
+        }
+    } else if popup.copy_mode {
+        "Enter=复制  Esc=返回  支持: 1-5, 3, 7-10, * / a / all".to_string()
+    } else if !popup.match_indices.is_empty() {
+        let current = popup.current_match + 1;
+        let total = popup.match_indices.len();
+        format!("↑↓=Navigate ←/→=Page  /=Search  n/N=跳转匹配({}/{})  c=Copy  e=Export  Esc=Close", current, total)
+    } else {
+        "↑↓=Navigate ←/→=Page  /=Search  Esc=Close  c=Copy  e=Export  Alt+方向键=移动".to_string()
+    };
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let file_color = e.get_source_id()
+                .map(|sid| get_file_color(sid))
+                .unwrap_or(Color::White);
+            let idx = Some(i + 1);
+            render_list_item(
+                e,
+                search_regex,
+                false,
+                false,
+                file_color,
+                idx,
+                horizontal_scroll,
+                wrap_lines,
+                area.width.saturating_sub(2) as usize,
+            )
+        })
+        .collect();
+
+    let mut list_state = ListState::default();
+    list_state.select(selected);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
+                .title_bottom(Line::from(help).right_aligned())
+                .border_style(Style::default().fg(Color::Magenta)),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(list, area, &mut list_state);
+
+    render_focus_scrollbar(frame, area, &list_state, entries.len());
+
+    // Copy input overlay
+    if popup.copy_mode {
+        let copy_area = centered_rect_with_offset(
+            40, 15, frame.area(), app.popup_offset_x, app.popup_offset_y,
+        );
+        frame.render_widget(Clear, copy_area);
+        let display_text = if popup.copy_input.is_empty() {
+            if let Some(feedback) = &popup.copy_feedback {
+                Span::styled(feedback.clone(), Style::default().fg(Color::Yellow))
+            } else {
+                Span::styled(
+                    "请输入行号, 如: 1-5, 3, 7-10, * / a / all",
+                    Style::default().fg(Color::DarkGray),
+                )
+            }
+        } else {
+            Span::raw(popup.copy_input.clone())
+        };
+        let copy_title = popup
+            .copy_feedback
+            .as_deref()
+            .unwrap_or("复制行号 (Enter复制 | Esc返回 | Alt+方向键移动 | Ctrl+0复位)");
+        let input = Paragraph::new(Line::from(display_text))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan))
+                    .title(format!(" {} ", copy_title))
+                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            );
+        frame.render_widget(input, copy_area);
+        frame.set_cursor_position((
+            copy_area.x + popup.copy_input.len() as u16 + 1,
+            copy_area.y + 1,
+        ));
+    }
+
+    // Search bar overlay
+    if popup.search_mode {
+        let max_width = area.width.saturating_sub(2);
+        if max_width >= 12 {
+            let desired_width = popup.search_query.chars().count() as u16 + 14;
+            let search_width = desired_width.max(20).min(max_width);
+            let search_area = Rect::new(
+                area.x + area.width.saturating_sub(search_width + 1),
+                area.y + 1,
+                search_width,
+                3,
+            );
+            frame.render_widget(Clear, search_area);
+        let search_text = format!("/{}", popup.search_query);
+        let search_bar = Paragraph::new(search_text)
+                .style(Style::default().fg(Color::Yellow))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Search ")
+                        .border_style(Style::default().fg(Color::Yellow)),
+                );
+        frame.render_widget(search_bar, search_area);
+            let cursor_x = (search_area.x + 2 + popup.search_query.chars().count() as u16)
+                .min(search_area.x + search_area.width.saturating_sub(2));
+        frame.set_cursor_position((
+                cursor_x,
+                search_area.y + 1,
+        ));
+        }
     }
 }
 
