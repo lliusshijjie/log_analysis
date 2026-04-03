@@ -52,6 +52,9 @@ pub struct LogEntry {
     pub source_file_lower: String,
     #[serde(skip_serializing)]
     pub searchable_text: String,
+    /// Original raw bytes for re-decoding in Detail view
+    #[serde(skip_serializing)]
+    pub raw_content: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

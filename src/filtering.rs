@@ -207,6 +207,7 @@ mod tests {
             level_kind: crate::models::LogLevelKind::from_level(level),
             source_file_lower: source.to_ascii_lowercase(),
             searchable_text: LogEntry::build_searchable_text(content, source, &tid),
+            raw_content: content.as_bytes().to_vec(),
         })
     }
 

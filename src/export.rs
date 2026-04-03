@@ -3,6 +3,7 @@ use chrono::Local;
 use serde::Serialize;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 
 use crate::models::{ChatMessage, DashboardStats, DisplayEntry, ExportType};
 
@@ -11,9 +12,10 @@ pub fn generate_filename(prefix: &str, extension: &str) -> String {
     format!("{}_export_{}.{}", prefix, timestamp, extension)
 }
 
-pub fn export_logs_to_csv(entries: &[DisplayEntry]) -> Result<String> {
+pub fn export_logs_to_csv(entries: &[DisplayEntry], export_dir: &PathBuf) -> Result<String> {
     let filename = generate_filename("logs", "csv");
-    let mut file = File::create(&filename)?;
+    let filepath = export_dir.join(&filename);
+    let mut file = File::create(&filepath)?;
 
     writeln!(
         file,
@@ -66,9 +68,10 @@ fn normalize_content_json(content: &str) -> serde_json::Value {
     }
 }
 
-pub fn export_logs_to_json(entries: &[DisplayEntry]) -> Result<String> {
+pub fn export_logs_to_json(entries: &[DisplayEntry], export_dir: &PathBuf) -> Result<String> {
     let filename = generate_filename("logs", "json");
-    let mut file = File::create(&filename)?;
+    let filepath = export_dir.join(&filename);
+    let mut file = File::create(&filepath)?;
 
     let logs: Vec<LogJson> = entries
         .iter()
@@ -159,9 +162,10 @@ struct SourceSummary {
     error_count: usize,
 }
 
-pub fn export_report(entries: &[DisplayEntry], stats: &DashboardStats) -> Result<String> {
+pub fn export_report(entries: &[DisplayEntry], stats: &DashboardStats, export_dir: &PathBuf) -> Result<String> {
     let filename = generate_filename("report", "json");
-    let mut file = File::create(&filename)?;
+    let filepath = export_dir.join(&filename);
+    let mut file = File::create(&filepath)?;
 
     let export_timestamp = Local::now().to_rfc3339();
 
@@ -318,9 +322,10 @@ struct AnalysisResult {
     context_logs_count: usize,
 }
 
-pub fn export_ai_analysis(chat_history: &[ChatMessage]) -> Result<String> {
+pub fn export_ai_analysis(chat_history: &[ChatMessage], export_dir: &PathBuf) -> Result<String> {
     let filename = generate_filename("ai_analysis", "json");
-    let mut file = File::create(&filename)?;
+    let filepath = export_dir.join(&filename);
+    let mut file = File::create(&filepath)?;
 
     let export_timestamp = Local::now().to_rfc3339();
 
@@ -365,11 +370,12 @@ pub fn perform_export(
     entries: &[DisplayEntry],
     stats: &DashboardStats,
     chat_history: &[ChatMessage],
+    export_dir: &PathBuf,
 ) -> Result<String> {
     match export_type {
-        ExportType::LogsCsv => export_logs_to_csv(entries),
-        ExportType::LogsJson => export_logs_to_json(entries),
-        ExportType::Report => export_report(entries, stats),
-        ExportType::AiAnalysis => export_ai_analysis(chat_history),
+        ExportType::LogsCsv => export_logs_to_csv(entries, export_dir),
+        ExportType::LogsJson => export_logs_to_json(entries, export_dir),
+        ExportType::Report => export_report(entries, stats, export_dir),
+        ExportType::AiAnalysis => export_ai_analysis(chat_history, export_dir),
     }
 }

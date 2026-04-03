@@ -47,6 +47,7 @@ pub fn parse_line(
         level_kind: LogLevelKind::from_level(level),
         source_file_lower: source_file.to_ascii_lowercase(),
         searchable_text: LogEntry::build_searchable_text(content, source_file, tid),
+        raw_content: line_bytes.to_vec(),
     })
 }
 

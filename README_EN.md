@@ -35,7 +35,7 @@ cargo run -- file1.log file2.log file3.log
         - **Line Numbering**: Shows sequential 1-based numbering for easy multi-line reference.
         - **Visual ID**: Cyan border and title displaying `🔍 FOCUS: query`.
         - **Actions**:
-            - **Multi-line Copy (`c`)**: Supports ranges (`1-5`), lists (`1,3,5`), or mixed input. Use `*` / `a` / `all` to copy all lines at once.
+            - **Multi-line Copy (`c`)**: Supports ranges (`1-5`), lists (`1,3,5`), or mixed input. Use `*` / `a` / `all` to copy all lines at once. Copy dialog shows "Copy line numbers - e.g. 1-5, 3, 7-10, */a/all".
             - **Sub-search (`/`)**: Further filter results within focus view.
             - **Export (`e`)**: Export focus view logs.
             - **Exit**: Press `Esc` to return to normal view.
@@ -44,8 +44,9 @@ cargo run -- file1.log file2.log file3.log
     - **Function**: Automatically filters logs containing the same correlation ID for complete request tracing.
     - **Visual ID**: Magenta title bar showing `[FILTER: Trace <ID>]`.
     - **Configurable**: Custom correlation ID regex patterns in `log_config.toml`.
-- **Horizontal Scroll & Word Wrap**:
+- **Horizontal Scroll & Word Wrap** (Enhanced):
     - **Horizontal Scroll**: Press `h` to scroll left, `l` to scroll right for viewing long log lines.
+    - **Touch Gesture**: Touchpad two-finger swipe for horizontal scrolling (works in Focus Mode, Thread View, and Advanced Search popup).
     - **Word Wrap**: Press `w` to toggle word wrap mode for automatic line breaking.
     - **Reset Scroll**: Press `Shift+H` to reset horizontal scroll to line start.
     - **Mutual Exclusion**: Horizontal scroll is disabled when word wrap is enabled.
@@ -54,8 +55,8 @@ cargo run -- file1.log file2.log file3.log
 - **Live Tailing** (Enhanced): `tail -f` like real-time monitoring. Automatically detects and incremental loads new lines. **Path Handling**: Improved file watcher to handle Windows path case-sensitivity and symbolic links.
 - **Noise Folding**: Merges continuous USB polling, thread cleaning, or duplicate logs to improve readability.
 - **Startup Warnings Popup**: When some files cannot be accessed due to permissions, a warning popup displays which files were skipped along with admin-run hints.
-- **File Solo Mode**:
-    - **Trigger**: Press `Tab` to switch to file list focus, use `↑/↓` to select a file.
+- **File Solo Mode** (Enhanced):
+    - **Pagination**: Press `Tab` to switch to file list focus, use `←` / `→` to navigate pages. Title bar shows current page `[Page 1/5]`.
     - **Workflow**: Press `Enter` once to mark the file (`[●]` indicator), press `Enter` again to enter Solo mode.
     - **Solo Mode**: Only shows logs from the selected file, auto-switches focus to log list.
     - **Visual**: Selected file shows `[●]` indicator.
@@ -66,7 +67,7 @@ cargo run -- file1.log file2.log file3.log
         - **Function**: Opens an isolated full-screen view containing all logs from the selected thread.
         - **Actions**:
             - `←` / `→` page navigation, `/` quick sub-search, `Shift+S` advanced search in thread view.
-            - `c` multi-line copy (supports `*` / `a` / `all` for copy-all), `e` export, `Esc` close.
+            - `c` multi-line copy (supports `*` / `a` / `all` for copy-all, copy dialog shows "Copy line numbers - e.g. 1-5, 3, 7-10, */a/all"), `e` export, `Esc` close.
 - **Advanced Search**:
     - **Complex Filtering**: `Shift+S` opens a panel for time range, regex content, source file, and log level combinations.
     - **Relative Time**: Supports `-1h`, `-30m`, `-2d`, etc.
@@ -110,6 +111,7 @@ cargo run -- file1.log file2.log file3.log
 | `g` / `G` | Nav | Jump to Top / Jump to Bottom |
 | `:` | Nav | **Jump to specific line number** |
 | `h` / `l` | Scroll | Horizontal scroll left/right (20 chars) |
+| Two-finger swipe | Scroll | (Touchpad) Two-finger horizontal swipe for scrolling |
 | `Shift+H` | Scroll | Reset horizontal scroll to start |
 | `w` | Display | **Toggle word wrap mode** |
 | `F1` | View | **Log List View** |
@@ -131,6 +133,7 @@ cargo run -- file1.log file2.log file3.log
 | `Ctrl+S` | Report | Save report as .md |
 | `Space` | File | Toggle file enabled state |
 | `Tab` | File | Switch to file list focus |
+| `←` / `→` | File | (File list) Page navigation |
 | `Enter` | File | (File list) **First press** mark file `[●]` / **Second press** enter Solo mode and auto-switch focus to log list |
 | `/` | Search | Quick regex search; use `&` delimiter for AND terms (e.g., `is&error`) (Esc=clear highlights, Enter=apply) |
 | `Shift+S` | Search | **Advanced Search Panel** |
@@ -149,7 +152,7 @@ cargo run -- file1.log file2.log file3.log
 | `f` | Tail | **Toggle Live Tailing** (Green `[LIVE]`) |
 | `a` | AI | Quick AI diagnosis for selected log |
 | `c` | Export | (Focus/Thread View) **Multi-line copy** (`*` / `a` / `all` supported) |
-| `e` | Export | Export filtered logs to CSV |
+| `e` | Export | Export filtered logs to CSV (default: Windows Downloads folder) |
 | `E` (Shift+E) | Export | Export filtered logs to JSON |
 | `r` | Export | Export stats report |
 | `R` (Shift+R) | Export | Export AI analysis |

@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashSet};
+use std::path::PathBuf;
 use std::sync::mpsc as std_mpsc;
 use std::time::{Duration, Instant};
 
@@ -440,6 +441,11 @@ pub struct App {
     // Shared popup offset for movable floating dialogs
     pub popup_offset_x: i16,
     pub popup_offset_y: i16,
+    // File list pagination
+    pub file_page: usize,
+    pub files_per_page: usize,
+    // Export path configuration
+    pub export_path: Option<PathBuf>,
     // Report state
     pub report_period: ReportPeriod,
     pub report_content: String,
@@ -548,6 +554,9 @@ impl App {
             adv_result_popup: AdvancedResultPopup::default(),
             popup_offset_x: 0,
             popup_offset_y: 0,
+            file_page: 1,
+            files_per_page: 15,
+            export_path: None,
             report_period: ReportPeriod::default(),
             report_content: String::new(),
             report_generating: false,
@@ -1189,6 +1198,53 @@ impl App {
         }
     }
 
+    /// Get total number of pages for file list
+    pub fn file_total_pages(&self) -> usize {
+        if self.files.is_empty() {
+            return 0;
+        }
+        (self.files.len() + self.files_per_page - 1) / self.files_per_page
+    }
+
+    /// Navigate to previous page in file list
+    pub fn file_prev_page(&mut self) {
+        if self.file_page > 1 {
+            self.file_page -= 1;
+        }
+    }
+
+    /// Navigate to next page in file list
+    pub fn file_next_page(&mut self) {
+        let total = self.file_total_pages();
+        if self.file_page < total {
+            self.file_page += 1;
+        }
+    }
+
+    /// Get the range of file indices for the current page
+    pub fn file_page_range(&self) -> std::ops::Range<usize> {
+        let total = self.file_total_pages();
+        if total == 0 {
+            return 0..0;
+        }
+        let current_page = self.file_page.min(total);
+        let start = (current_page - 1) * self.files_per_page;
+        let end = (start + self.files_per_page).min(self.files.len());
+        start..end
+    }
+
+    /// Get the effective export directory, defaulting to Downloads folder
+    pub fn get_export_dir(&self) -> PathBuf {
+        self.export_path.clone().unwrap_or_else(|| {
+            dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
+        })
+    }
+
+    /// Set export path to default (Downloads folder)
+    pub fn set_default_export_path(&mut self) {
+        self.export_path = dirs::download_dir();
+    }
+
     pub fn open_selected_folded_popup(&mut self) -> bool {
         let selected = match self.current_view {
             CurrentView::Focus => self
@@ -1393,11 +1449,18 @@ impl App {
         if let ExportState::Confirm(export_type) = self.export_state.clone() {
             self.export_state = ExportState::Exporting(export_type.clone());
 
+            // Set default export path if not configured
+            if self.export_path.is_none() {
+                self.set_default_export_path();
+            }
+            let export_dir = self.get_export_dir();
+
             let filtered_entries = self.filtered_entries_owned();
             let stats = self.stats.clone();
             let chat_history = self.chat_history.clone();
             let export_type_clone = export_type.clone();
             let tx = self.export_tx.clone();
+            let export_dir_clone = export_dir.clone();
 
             std::thread::spawn(move || {
                 let result = match crate::export::perform_export(
@@ -1405,6 +1468,7 @@ impl App {
                     &filtered_entries,
                     &stats,
                     &chat_history,
+                    &export_dir_clone,
                 ) {
                     Ok(filename) => ExportResult::Success(filename),
                     Err(e) => ExportResult::Error(e.to_string()),
