@@ -883,10 +883,15 @@ fn render_focus_scrollbar(frame: &mut Frame, area: Rect, selected: Option<usize>
 }
 
 pub fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let title = if !app.search_terms.is_empty() {
+        " Search (AND) "
+    } else {
+        " Search (regex) "
+    };
     let search = Paragraph::new(format!("/{}", app.search_query)).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Search (regex) "),
+            .title(title),
     );
     frame.render_widget(search, area);
 }

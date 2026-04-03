@@ -47,6 +47,8 @@ pub struct FocusModeState {
     pub history: Vec<FocusSnapshot>,
     /// Search regex for text highlighting within focus mode
     pub search_regex: Option<Regex>,
+    /// Multiple regex terms for AND search (space-separated, each term must match)
+    pub search_terms: Vec<Regex>,
 }
 
 impl FocusModeState {
@@ -61,6 +63,7 @@ impl FocusModeState {
             copy_input: String::new(),
             history: Vec::new(),
             search_regex: None,
+            search_terms: Vec::new(),
         }
     }
 
@@ -74,6 +77,7 @@ impl FocusModeState {
         self.copy_input.clear();
         self.history.clear();
         self.search_regex = None;
+        self.search_terms.clear();
     }
 
     /// Push current state onto history stack before narrowing down
@@ -122,6 +126,8 @@ pub struct ThreadViewState {
     pub copy_input: String,
     /// Search regex for text highlighting within thread view
     pub search_regex: Option<Regex>,
+    /// Multiple regex terms for AND search (space-separated, each term must match)
+    pub search_terms: Vec<Regex>,
 }
 
 impl ThreadViewState {
@@ -134,6 +140,7 @@ impl ThreadViewState {
             zoom_level: 1,
             copy_input: String::new(),
             search_regex: None,
+            search_terms: Vec::new(),
         }
     }
 
@@ -145,6 +152,7 @@ impl ThreadViewState {
         self.zoom_level = 1;
         self.copy_input.clear();
         self.search_regex = None;
+        self.search_terms.clear();
     }
 
     pub fn zoom_in(&mut self) {
@@ -316,6 +324,8 @@ pub struct App {
     pub search_mode: bool,
     pub search_query: String,
     pub search_regex: Option<Regex>,
+    /// Multiple regex terms for AND search (space-separated, each term must match)
+    pub search_terms: Vec<Regex>,
     pub negative_search: bool,
     pub match_indices: Vec<usize>,
     pub match_index_set: HashSet<usize>,
@@ -429,6 +439,7 @@ impl App {
             search_mode: false,
             search_query: String::new(),
             search_regex: None,
+            search_terms: Vec::new(),
             negative_search: false,
             match_indices: Vec::new(),
             match_index_set: HashSet::new(),
@@ -851,36 +862,82 @@ impl App {
     pub fn clear_search(&mut self) {
         self.search_mode = false;
         self.search_regex = None;
+        self.search_terms.clear();
         self.match_indices.clear();
         self.match_index_set.clear();
         self.needs_redraw = true;
     }
 
     pub fn update_search(&mut self) {
-        if self.search_query.starts_with('!') {
-            self.negative_search = true;
-            let pattern = &self.search_query[1..];
-            self.search_regex = if pattern.is_empty() {
-                None
-            } else {
-                Regex::new(pattern).ok()
-            };
-        } else {
-            self.negative_search = false;
-            self.search_regex = Regex::new(&self.search_query).ok();
+        self.search_terms.clear();
+
+        let query = &self.search_query;
+        if query.is_empty() {
+            self.search_regex = None;
+            self.update_search_matches();
+            return;
         }
+
+        // Check for negative search prefix
+        let (is_negative, pattern) = if query.starts_with('!') {
+            (true, &query[1..])
+        } else {
+            (false, query.as_str())
+        };
+        self.negative_search = is_negative;
+
+        if pattern.is_empty() {
+            self.search_regex = None;
+            self.update_search_matches();
+            return;
+        }
+
+        // Check if pattern is quoted (treat as single regex)
+        let trimmed = pattern.trim();
+        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+            // Quoted string: treat as single regex
+            let inner = &trimmed[1..trimmed.len() - 1];
+            self.search_regex = Regex::new(inner).ok();
+        } else if !trimmed.contains(' ') {
+            // Single term without spaces: use single regex
+            self.search_regex = Regex::new(trimmed).ok();
+        } else {
+            // Multiple space-separated terms: AND search
+            self.search_regex = None;
+            for term in trimmed.split_whitespace() {
+                if let Ok(re) = Regex::new(term) {
+                    self.search_terms.push(re);
+                }
+            }
+        }
+
         self.update_search_matches();
     }
 
     pub fn update_search_matches(&mut self) {
         self.match_indices.clear();
         self.match_index_set.clear();
-        if let Some(re) = &self.search_regex {
+
+        // Helper to check if entry matches the search criteria
+        let entry_matches = |entry: &DisplayEntry| -> bool {
+            // Single regex mode
+            if let Some(re) = &self.search_regex {
+                return entry.matches_search(re);
+            }
+            // Multi-term AND mode: all terms must match
+            if !self.search_terms.is_empty() {
+                return self.search_terms.iter().all(|re| entry.matches_search(re));
+            }
+            // No search criteria
+            false
+        };
+
+        if self.search_regex.is_some() || !self.search_terms.is_empty() {
             for (i, &all_idx) in self.filtered_indices.iter().enumerate() {
                 let Some(entry) = self.all_entries.get(all_idx) else {
                     continue;
                 };
-                let matches = entry.matches_search(re);
+                let matches = entry_matches(entry);
                 if self.negative_search {
                     if !matches {
                         self.match_indices.push(i);
@@ -1387,21 +1444,72 @@ impl App {
 
         // Save current state before narrowing down
         self.focus_mode.push_snapshot();
+        self.focus_mode.search_terms.clear();
 
         let negative = self.search_query.starts_with('!');
         let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
-        
-        if let Ok(re) = Regex::new(pattern) {
-            let filtered: Vec<DisplayEntry> = self.focus_mode.original_focus_logs
-                .iter()
-                .filter(|e| {
-                    let matches = e.matches_search(&re);
-                    if negative { !matches } else { matches }
-                })
-                .cloned()
-                .collect();
-            self.focus_mode.focus_logs = filtered;
-            self.focus_mode.search_regex = if negative { None } else { Some(re) };
+        let trimmed = pattern.trim();
+
+        // Helper to check if entry matches the search criteria
+        let entry_matches = |e: &DisplayEntry, re: &Regex| -> bool {
+            e.matches_search(re)
+        };
+
+        if trimmed.is_empty() {
+            return;
+        }
+
+        // Check if pattern is quoted (treat as single regex)
+        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            if let Ok(re) = Regex::new(inner) {
+                let filtered: Vec<DisplayEntry> = self.focus_mode.original_focus_logs
+                    .iter()
+                    .filter(|e| {
+                        let matches = entry_matches(e, &re);
+                        if negative { !matches } else { matches }
+                    })
+                    .cloned()
+                    .collect();
+                self.focus_mode.focus_logs = filtered;
+                self.focus_mode.search_regex = if negative { None } else { Some(re) };
+            }
+        } else if !trimmed.contains(' ') {
+            // Single term without spaces: use single regex
+            if let Ok(re) = Regex::new(trimmed) {
+                let filtered: Vec<DisplayEntry> = self.focus_mode.original_focus_logs
+                    .iter()
+                    .filter(|e| {
+                        let matches = entry_matches(e, &re);
+                        if negative { !matches } else { matches }
+                    })
+                    .cloned()
+                    .collect();
+                self.focus_mode.focus_logs = filtered;
+                self.focus_mode.search_regex = if negative { None } else { Some(re) };
+            }
+        } else {
+            // Multiple space-separated terms: AND search
+            let mut terms: Vec<Regex> = Vec::new();
+            for term in trimmed.split_whitespace() {
+                if let Ok(re) = Regex::new(term) {
+                    terms.push(re);
+                }
+            }
+            self.focus_mode.search_terms = terms.clone();
+
+            if !self.focus_mode.search_terms.is_empty() {
+                let filtered: Vec<DisplayEntry> = self.focus_mode.original_focus_logs
+                    .iter()
+                    .filter(|e| {
+                        let matches = self.focus_mode.search_terms.iter().all(|re| entry_matches(e, re));
+                        if negative { !matches } else { matches }
+                    })
+                    .cloned()
+                    .collect();
+                self.focus_mode.focus_logs = filtered;
+                self.focus_mode.search_regex = None;
+            }
         }
 
         // The new filtered set becomes the base for further sub-searches
@@ -1482,25 +1590,73 @@ impl App {
 
     /// Update search within thread view
     pub fn thread_update_search(&mut self) {
+        self.thread_view.search_terms.clear();
+
         if self.search_query.is_empty() {
             self.thread_view.thread_logs = self.thread_view.original_thread_logs.clone();
             self.thread_view.search_regex = None;
         } else {
             let negative = self.search_query.starts_with('!');
             let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
+            let trimmed = pattern.trim();
 
-            if let Ok(re) = Regex::new(pattern) {
-                self.thread_view.thread_logs = self
-                    .thread_view
-                    .original_thread_logs
-                    .iter()
-                    .filter(|e| {
-                        let matches = e.matches_search(&re);
-                        if negative { !matches } else { matches }
-                    })
-                    .cloned()
-                    .collect();
-                self.thread_view.search_regex = if negative { None } else { Some(re) };
+            // Helper to check if entry matches the search criteria
+            let entry_matches = |e: &DisplayEntry, re: &Regex| -> bool {
+                e.matches_search(re)
+            };
+
+            // Check if pattern is quoted (treat as single regex)
+            if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+                let inner = &trimmed[1..trimmed.len() - 1];
+                if let Ok(re) = Regex::new(inner) {
+                    self.thread_view.thread_logs = self
+                        .thread_view
+                        .original_thread_logs
+                        .iter()
+                        .filter(|e| {
+                            let matches = entry_matches(e, &re);
+                            if negative { !matches } else { matches }
+                        })
+                        .cloned()
+                        .collect();
+                    self.thread_view.search_regex = if negative { None } else { Some(re) };
+                }
+            } else if !trimmed.contains(' ') {
+                // Single term without spaces: use single regex
+                if let Ok(re) = Regex::new(trimmed) {
+                    self.thread_view.thread_logs = self
+                        .thread_view
+                        .original_thread_logs
+                        .iter()
+                        .filter(|e| {
+                            let matches = entry_matches(e, &re);
+                            if negative { !matches } else { matches }
+                        })
+                        .cloned()
+                        .collect();
+                    self.thread_view.search_regex = if negative { None } else { Some(re) };
+                }
+            } else {
+                // Multiple space-separated terms: AND search
+                for term in trimmed.split_whitespace() {
+                    if let Ok(re) = Regex::new(term) {
+                        self.thread_view.search_terms.push(re);
+                    }
+                }
+
+                if !self.thread_view.search_terms.is_empty() {
+                    self.thread_view.thread_logs = self
+                        .thread_view
+                        .original_thread_logs
+                        .iter()
+                        .filter(|e| {
+                            let matches = self.thread_view.search_terms.iter().all(|re| entry_matches(e, re));
+                            if negative { !matches } else { matches }
+                        })
+                        .cloned()
+                        .collect();
+                    self.thread_view.search_regex = None;
+                }
             }
         }
 
