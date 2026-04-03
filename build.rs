@@ -41,6 +41,8 @@ fn try_build_windows_resources() {
                 obj_file.to_string_lossy().as_ref(),
                 "-O",
                 "coff",
+                "-F",
+                "pe-x86-64",
             ])
             .status()
         {

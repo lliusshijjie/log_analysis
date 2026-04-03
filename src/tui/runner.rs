@@ -501,12 +501,31 @@ pub fn run_app(
                     if !supports_swipe {
                         continue;
                     }
+                    if app.wrap_lines {
+                        continue;
+                    }
                     match mouse_event.kind {
-                        MouseEventKind::ScrollLeft if !app.wrap_lines => {
+                        MouseEventKind::ScrollLeft => {
                             app.scroll_horizontal_left(20);
                             app.needs_redraw = true;
                         }
-                        MouseEventKind::ScrollRight if !app.wrap_lines => {
+                        MouseEventKind::ScrollRight => {
+                            app.scroll_horizontal_right(20);
+                            app.needs_redraw = true;
+                        }
+                        MouseEventKind::ScrollUp
+                            if mouse_event
+                                .modifiers
+                                .contains(KeyModifiers::SHIFT) =>
+                        {
+                            app.scroll_horizontal_left(20);
+                            app.needs_redraw = true;
+                        }
+                        MouseEventKind::ScrollDown
+                            if mouse_event
+                                .modifiers
+                                .contains(KeyModifiers::SHIFT) =>
+                        {
                             app.scroll_horizontal_right(20);
                             app.needs_redraw = true;
                         }
@@ -925,21 +944,30 @@ pub fn run_app(
                                     "adv_search_{}.log",
                                     chrono::Local::now().format("%Y%m%d_%H%M%S")
                                 );
-                                let content: String = app
-                                    .adv_result_popup
-                                    .logs
-                                    .iter()
-                                    .map(|e| e.get_content())
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                match std::fs::write(&filename, content) {
-                                    Ok(_) => {
-                                        app.status_msg =
-                                            Some((format!("已导出到 {}", filename), Instant::now()))
-                                    }
-                                    Err(e) => {
-                                        app.status_msg =
-                                            Some((format!("导出失败: {}", e), Instant::now()))
+                                let export_dir = app.get_export_dir();
+                                if let Err(e) = std::fs::create_dir_all(&export_dir) {
+                                    app.status_msg =
+                                        Some((format!("导出失败: {}", e), Instant::now()));
+                                } else {
+                                    let filepath = export_dir.join(&filename);
+                                    let content: String = app
+                                        .adv_result_popup
+                                        .logs
+                                        .iter()
+                                        .map(|e| e.get_content())
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    match std::fs::write(&filepath, content) {
+                                        Ok(_) => {
+                                            app.status_msg = Some((
+                                                format!("已导出到 {}", filepath.display()),
+                                                Instant::now(),
+                                            ))
+                                        }
+                                        Err(e) => {
+                                            app.status_msg =
+                                                Some((format!("导出失败: {}", e), Instant::now()))
+                                        }
                                     }
                                 }
                             }
@@ -1337,28 +1365,36 @@ pub fn run_app(
                                     app.input_mode = InputMode::FocusCopyInput;
                                 }
                                 KeyCode::Char('e') => {
-                                    // Export focus mode entries to file
                                     let filename = format!(
                                         "focus_{}.log",
                                         chrono::Local::now().format("%Y%m%d_%H%M%S")
                                     );
-                                    let content: String = app
-                                        .focus_mode
-                                        .focus_logs
-                                        .iter()
-                                        .map(|e| e.get_content())
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    match std::fs::write(&filename, content) {
-                                        Ok(_) => {
-                                            app.status_msg = Some((
-                                                format!("已导出到 {}", filename),
-                                                Instant::now(),
-                                            ))
-                                        }
-                                        Err(e) => {
-                                            app.status_msg =
-                                                Some((format!("导出失败: {}", e), Instant::now()))
+                                    let export_dir = app.get_export_dir();
+                                    if let Err(e) = std::fs::create_dir_all(&export_dir) {
+                                        app.status_msg =
+                                            Some((format!("导出失败: {}", e), Instant::now()));
+                                    } else {
+                                        let filepath = export_dir.join(&filename);
+                                        let content: String = app
+                                            .focus_mode
+                                            .focus_logs
+                                            .iter()
+                                            .map(|e| e.get_content())
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        match std::fs::write(&filepath, content) {
+                                            Ok(_) => {
+                                                app.status_msg = Some((
+                                                    format!("已导出到 {}", filepath.display()),
+                                                    Instant::now(),
+                                                ))
+                                            }
+                                            Err(e) => {
+                                                app.status_msg = Some((
+                                                    format!("导出失败: {}", e),
+                                                    Instant::now(),
+                                                ))
+                                            }
                                         }
                                     }
                                 }
@@ -1403,29 +1439,37 @@ pub fn run_app(
                                     app.input_mode = InputMode::FocusCopyInput;
                                 }
                                 KeyCode::Char('e') => {
-                                    // Export thread view entries to file
                                     let filename = format!(
                                         "thread_{}_{}.log",
                                         app.thread_view.thread_id,
                                         chrono::Local::now().format("%Y%m%d_%H%M%S")
                                     );
-                                    let content: String = app
-                                        .thread_view
-                                        .thread_logs
-                                        .iter()
-                                        .map(|e| e.get_content())
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    match std::fs::write(&filename, content) {
-                                        Ok(_) => {
-                                            app.status_msg = Some((
-                                                format!("已导出到 {}", filename),
-                                                Instant::now(),
-                                            ))
-                                        }
-                                        Err(e) => {
-                                            app.status_msg =
-                                                Some((format!("导出失败: {}", e), Instant::now()))
+                                    let export_dir = app.get_export_dir();
+                                    if let Err(e) = std::fs::create_dir_all(&export_dir) {
+                                        app.status_msg =
+                                            Some((format!("导出失败: {}", e), Instant::now()));
+                                    } else {
+                                        let filepath = export_dir.join(&filename);
+                                        let content: String = app
+                                            .thread_view
+                                            .thread_logs
+                                            .iter()
+                                            .map(|e| e.get_content())
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        match std::fs::write(&filepath, content) {
+                                            Ok(_) => {
+                                                app.status_msg = Some((
+                                                    format!("已导出到 {}", filepath.display()),
+                                                    Instant::now(),
+                                                ))
+                                            }
+                                            Err(e) => {
+                                                app.status_msg = Some((
+                                                    format!("导出失败: {}", e),
+                                                    Instant::now(),
+                                                ))
+                                            }
                                         }
                                     }
                                 }
