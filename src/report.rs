@@ -75,7 +75,9 @@ pub fn generate_report_context(logs: &[LogEntry], period: ReportPeriod) -> Repor
         .filter(|log| {
             if let Ok(ts) = NaiveDateTime::parse_from_str(&log.timestamp, "%Y-%m-%d %H:%M:%S%.f") {
                 ts >= start_time && ts < end_time
-            } else if let Ok(ts) = NaiveDateTime::parse_from_str(&log.timestamp, "%Y-%m-%d %H:%M:%S") {
+            } else if let Ok(ts) =
+                NaiveDateTime::parse_from_str(&log.timestamp, "%Y-%m-%d %H:%M:%S")
+            {
                 ts >= start_time && ts < end_time
             } else {
                 true

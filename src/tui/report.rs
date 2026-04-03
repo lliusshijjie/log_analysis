@@ -6,7 +6,11 @@ use crate::models::InputMode;
 use crate::report::ReportPeriod;
 
 pub fn render_report(frame: &mut Frame, app: &mut App, area: Rect) {
-    let has_status = app.status_msg.as_ref().map(|(_, t)| t.elapsed().as_secs() < 3).unwrap_or(false);
+    let has_status = app
+        .status_msg
+        .as_ref()
+        .map(|(_, t)| t.elapsed().as_secs() < 3)
+        .unwrap_or(false);
     let main_area = if has_status {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -14,8 +18,11 @@ pub fn render_report(frame: &mut Frame, app: &mut App, area: Rect) {
             .split(area);
         // Render status bar
         if let Some((msg, _)) = &app.status_msg {
-            let status = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD));
+            let status = Paragraph::new(msg.as_str()).style(
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            );
             frame.render_widget(status, chunks[1]);
         }
         chunks[0]
@@ -35,13 +42,12 @@ pub fn render_report(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.input_mode == InputMode::ReportSaveInput {
         let popup_area = centered_rect(60, 3, area);
         frame.render_widget(Clear, popup_area);
-        let input = Paragraph::new(app.input_buffer.as_str())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" 保存路径 (Enter确认, Esc取消) ")
-                    .border_style(Style::default().fg(Color::Cyan)),
-            );
+        let input = Paragraph::new(app.input_buffer.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" 保存路径 (Enter确认, Esc取消) ")
+                .border_style(Style::default().fg(Color::Cyan)),
+        );
         frame.render_widget(input, popup_area);
     }
 }
@@ -66,12 +72,18 @@ fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
 }
 
 fn render_period_selector(frame: &mut Frame, app: &mut App, area: Rect) {
-    let periods = [ReportPeriod::Today, ReportPeriod::Yesterday, ReportPeriod::Week];
+    let periods = [
+        ReportPeriod::Today,
+        ReportPeriod::Yesterday,
+        ReportPeriod::Week,
+    ];
     let items: Vec<ListItem> = periods
         .iter()
         .map(|p| {
             let style = if *p == app.report_period {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };

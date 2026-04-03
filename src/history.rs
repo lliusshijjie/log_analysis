@@ -34,7 +34,11 @@ impl HistoryManager {
 
         let entries = Self::load_from_file(&file_path).unwrap_or_default();
 
-        let selected = if entries.is_empty() { 0 } else { entries.len() - 1 };
+        let selected = if entries.is_empty() {
+            0
+        } else {
+            entries.len() - 1
+        };
 
         Self {
             entries,

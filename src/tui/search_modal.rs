@@ -36,13 +36,8 @@ pub fn render_search_modal(frame: &mut Frame, app: &App) {
     }
 
     // Modal dimensions: 65% width, 60% height, centered
-    let area = centered_rect_with_offset(
-        65,
-        60,
-        frame.area(),
-        app.popup_offset_x,
-        app.popup_offset_y,
-    );
+    let area =
+        centered_rect_with_offset(65, 60, frame.area(), app.popup_offset_x, app.popup_offset_y);
 
     // Clear background and draw outer border
     frame.render_widget(Clear, area);
@@ -146,11 +141,7 @@ pub fn render_search_modal(frame: &mut Frame, app: &App) {
     );
 
     // Submit button
-    render_submit_button(
-        frame,
-        chunks[6],
-        form.focused_field == FormField::SubmitBtn,
-    );
+    render_submit_button(frame, chunks[6], form.focused_field == FormField::SubmitBtn);
 
     // Status or error message
     if let Some(ref error) = form.error_message {
@@ -261,15 +252,13 @@ fn render_level_selector(
         ""
     };
 
-    let widget = Paragraph::new(content)
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" 日志级别 (可多选) ")
-                .title_bottom(Line::from(hint).right_aligned().fg(Color::DarkGray))
-                .border_style(border_style),
-        );
+    let widget = Paragraph::new(content).alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 日志级别 (可多选) ")
+            .title_bottom(Line::from(hint).right_aligned().fg(Color::DarkGray))
+            .border_style(border_style),
+    );
 
     frame.render_widget(widget, area);
 }
@@ -299,13 +288,8 @@ fn render_submit_button(frame: &mut Frame, area: Rect, is_focused: bool) {
 
 /// Render the save template dialog
 fn render_save_template_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect_with_offset(
-        50,
-        25,
-        frame.area(),
-        app.popup_offset_x,
-        app.popup_offset_y,
-    );
+    let area =
+        centered_rect_with_offset(50, 25, frame.area(), app.popup_offset_x, app.popup_offset_y);
     frame.render_widget(Clear, area);
 
     let block = Block::default()
@@ -334,8 +318,7 @@ fn render_save_template_dialog(frame: &mut Frame, app: &App) {
         .split(inner);
 
     // Label
-    let label = Paragraph::new("请输入模板名称:")
-        .style(Style::default().fg(Color::White));
+    let label = Paragraph::new("请输入模板名称:").style(Style::default().fg(Color::White));
     frame.render_widget(label, chunks[0]);
 
     // Input
@@ -364,13 +347,8 @@ fn render_save_template_dialog(frame: &mut Frame, app: &App) {
 
 /// Render the load template dialog
 fn render_load_template_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect_with_offset(
-        50,
-        50,
-        frame.area(),
-        app.popup_offset_x,
-        app.popup_offset_y,
-    );
+    let area =
+        centered_rect_with_offset(50, 50, frame.area(), app.popup_offset_x, app.popup_offset_y);
     frame.render_widget(Clear, area);
 
     let form = &app.search_form;
@@ -427,4 +405,3 @@ fn render_load_template_dialog(frame: &mut Frame, app: &App) {
 
     frame.render_widget(list, inner);
 }
-

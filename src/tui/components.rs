@@ -1,15 +1,20 @@
 use ratatui::{
     prelude::*,
-    widgets::{Bar, BarChart, BarGroup, Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Bar, BarChart, BarGroup, Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
+    },
 };
 use regex::Regex;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use unicode_width::UnicodeWidthStr;
 use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app_state::App;
-use crate::models::{AiState, CurrentView, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility};
+use crate::models::{
+    AiState, CurrentView, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode,
+    LevelVisibility,
+};
 use crate::tui::layout::{centered_rect, centered_rect_with_offset};
 use crate::tui::syntax::highlight_content_default;
 
@@ -71,6 +76,30 @@ fn apply_search_highlight(spans: Vec<Span<'static>>, regex: &Regex) -> Vec<Span<
     result
 }
 
+fn apply_search_highlights(spans: Vec<Span<'static>>, regexes: &[&Regex]) -> Vec<Span<'static>> {
+    regexes
+        .iter()
+        .fold(spans, |acc, re| apply_search_highlight(acc, re))
+}
+
+fn collect_active_search_regexes<'a>(
+    entry: &DisplayEntry,
+    search_regex: Option<&'a Regex>,
+    search_terms: &'a [Regex],
+) -> Vec<&'a Regex> {
+    let and_terms_match =
+        search_terms.is_empty() || search_terms.iter().all(|re| entry.matches_search(re));
+
+    let mut active_regexes: Vec<&Regex> = Vec::new();
+    if let Some(re) = search_regex {
+        active_regexes.push(re);
+    }
+    if and_terms_match {
+        active_regexes.extend(search_terms.iter());
+    }
+    active_regexes
+}
+
 /// Apply horizontal scroll offset based on terminal display columns
 fn apply_horizontal_scroll(content: &str, offset: usize) -> String {
     if offset == 0 {
@@ -93,7 +122,10 @@ fn truncate_spans_to_width(spans: Vec<Span<'static>>, max_width: usize) -> Vec<S
     if max_width == 0 {
         return Vec::new();
     }
-    let total_width: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+    let total_width: usize = spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
     if total_width <= max_width {
         return spans;
     }
@@ -207,6 +239,7 @@ fn wrap_spans_to_lines(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Line<
 fn render_list_item(
     entry: &DisplayEntry,
     search_regex: Option<&Regex>,
+    search_terms: &[Regex],
     is_match: bool,
     is_bookmarked: bool,
     file_color: Color,
@@ -215,10 +248,13 @@ fn render_list_item(
     wrap_lines: bool,
     available_width: usize,
 ) -> ListItem<'static> {
+    let active_regexes = collect_active_search_regexes(entry, search_regex, search_terms);
+
     let line_idx = if let Some(n) = display_index {
         format!("{:>5} ", n)
     } else {
-        entry.get_line_index()
+        entry
+            .get_line_index()
             .map(|n| format!("{:>5} ", n))
             .unwrap_or_else(|| "      ".into())
     };
@@ -251,7 +287,10 @@ fn render_list_item(
                 Span::raw(" "),
             ]);
 
-            let prefix_width: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+            let prefix_width: usize = spans
+                .iter()
+                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .sum();
 
             let display_content = if !wrap_lines && horizontal_scroll > 0 {
                 apply_horizontal_scroll(&content, horizontal_scroll)
@@ -265,9 +304,6 @@ fn render_list_item(
                 .into_iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))
                 .collect();
-            if let Some(re) = search_regex {
-                content_spans = apply_search_highlight(content_spans, re);
-            }
 
             if !wrap_lines {
                 let content_max = available_width.saturating_sub(prefix_width);
@@ -281,6 +317,9 @@ fn render_list_item(
             }
 
             spans.extend(content_spans);
+            if !active_regexes.is_empty() {
+                spans = apply_search_highlights(spans, &active_regexes);
+            }
             let style = if is_bookmarked {
                 Style::default().bg(Color::Rgb(40, 40, 60))
             } else {
@@ -313,6 +352,9 @@ fn render_list_item(
             ];
             if !wrap_lines {
                 folded_spans = truncate_spans_to_width(folded_spans, available_width);
+            }
+            if !active_regexes.is_empty() {
+                folded_spans = apply_search_highlights(folded_spans, &active_regexes);
             }
             if wrap_lines {
                 let wrap_width = available_width.saturating_sub(2).max(8);
@@ -466,7 +508,11 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .map(|f| {
             let mark = if f.marked { "[●] " } else { "    " };
-            let mark_color = if f.marked { Color::Cyan } else { Color::DarkGray };
+            let mark_color = if f.marked {
+                Color::Cyan
+            } else {
+                Color::DarkGray
+            };
             ListItem::new(Line::from(vec![
                 Span::styled(mark, Style::default().fg(mark_color)),
                 Span::styled(&f.name, Style::default().fg(f.color)),
@@ -507,6 +553,7 @@ fn render_log_list_with_state<'a, F>(
     filter_tid: &Option<String>,
     filter_trace: &Option<String>,
     search_regex: &Option<Regex>,
+    search_terms: &[Regex],
     focus: Focus,
     search_mode: bool,
     files: &[FileInfo],
@@ -532,39 +579,48 @@ fn render_log_list_with_state<'a, F>(
     let (title, title_style, border_style, help) = if is_focus_mode {
         let focus_title = format!(
             " 🔍 FOCUS: {} ({} 条) {} [Esc退出]",
-            focus_query,
-            total_entries,
-            level_status
+            focus_query, total_entries, level_status
         );
         (
             focus_title,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
             Style::default().fg(Color::Cyan),
             "←/→=Page Up/Down  / =Search  Esc=Close  c=Copy  e=Export",
         )
     } else {
-        let mut title = match (filter_tid, filter_trace, search_regex) {
-            (Some(tid), _, Some(_)) => format!(
+        let has_active_search = search_regex.is_some() || !search_terms.is_empty();
+        let mut title = match (filter_tid, filter_trace, has_active_search) {
+            (Some(tid), _, true) => format!(
                 " {}[FILTER: Thread {}] [SEARCH: {} matches] {} ",
-                tail_indicator, tid, match_indices.len(), level_status
+                tail_indicator,
+                tid,
+                match_indices.len(),
+                level_status
             ),
-            (Some(tid), _, None) => format!(
+            (Some(tid), _, false) => format!(
                 " {}[FILTER: Thread {}] {} ",
                 tail_indicator, tid, level_status
             ),
-            (None, Some(trace), Some(_)) => format!(
+            (None, Some(trace), true) => format!(
                 " {}[FILTER: Trace {}] [SEARCH: {} matches] {} ",
-                tail_indicator, trace, match_indices.len(), level_status
+                tail_indicator,
+                trace,
+                match_indices.len(),
+                level_status
             ),
-            (None, Some(trace), None) => format!(
+            (None, Some(trace), false) => format!(
                 " {}[FILTER: Trace {}] {} ",
                 tail_indicator, trace, level_status
             ),
-            (None, None, Some(_)) => format!(
+            (None, None, true) => format!(
                 " {}[SEARCH: {} matches] {} ",
-                tail_indicator, match_indices.len(), level_status
+                tail_indicator,
+                match_indices.len(),
+                level_status
             ),
-            (None, None, None) => format!(
+            (None, None, false) => format!(
                 " {}Logs ({}) {} ",
                 tail_indicator, total_entries, level_status
             ),
@@ -580,11 +636,17 @@ fn render_log_list_with_state<'a, F>(
             title.push_str(&format!("[ADV: {}] ", short));
         }
         let title_style = if is_tailing {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
         } else if filter_trace.is_some() {
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
-        } else if filter_tid.is_some() || search_regex.is_some() {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD)
+        } else if filter_tid.is_some() || has_active_search {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -632,7 +694,8 @@ fn render_log_list_with_state<'a, F>(
         (start..end)
             .filter_map(|i| {
                 let e = entry_at(i)?;
-                let file_color = e.get_source_id()
+                let file_color = e
+                    .get_source_id()
                     .and_then(|sid| file_color_map.get(&sid).copied())
                     .unwrap_or(Color::White);
                 let idx = if is_focus_mode { Some(i + 1) } else { None };
@@ -645,6 +708,7 @@ fn render_log_list_with_state<'a, F>(
                 Some(render_list_item(
                     e,
                     search_regex.as_ref(),
+                    search_terms,
                     is_match,
                     is_bookmarked,
                     file_color,
@@ -698,6 +762,7 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &App, area: Rect) {
         &app.filter_tid,
         &app.filter_trace,
         &app.search_regex,
+        &app.search_terms,
         app.focus,
         app.search_mode,
         &app.files,
@@ -728,6 +793,7 @@ pub fn render_focus_list(frame: &mut Frame, app: &App, area: Rect) {
         &None,
         &None,
         &app.focus_mode.search_regex,
+        &app.focus_mode.search_terms,
         Focus::LogList,
         false,
         &app.files,
@@ -760,16 +826,30 @@ pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
     // Top-right buttons: zoom in, zoom out, close
     let buttons = Line::from(vec![
         Span::styled("[", Style::default().fg(Color::DarkGray)),
-        Span::styled("+", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "+",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Zoom", Style::default().fg(Color::DarkGray)),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled("-", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "-",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Zoom", Style::default().fg(Color::DarkGray)),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled("x", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "x",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Close", Style::default().fg(Color::DarkGray)),
         Span::styled("]", Style::default().fg(Color::DarkGray)),
-    ]).right_aligned();
+    ])
+    .right_aligned();
 
     // Help text at bottom
     let help = "←/→=Page Up/Down  / =Search  h/l=横向  w=换行  Esc=Close  c=Copy  e=Export";
@@ -792,17 +872,20 @@ pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let thread_search_regex = app.thread_view.search_regex.as_ref();
+    let thread_search_terms = &app.thread_view.search_terms;
 
     let items: Vec<ListItem> = (start..end)
         .map(|i| {
             let e = &entries[i];
-            let file_color = e.get_source_id()
+            let file_color = e
+                .get_source_id()
                 .and_then(|sid| file_color_map.get(&sid).copied())
                 .unwrap_or(Color::White);
             let idx = Some(i + 1);
             render_list_item(
                 e,
                 thread_search_regex,
+                thread_search_terms,
                 false,
                 app.bookmark_index_set.contains(&i),
                 file_color,
@@ -822,7 +905,11 @@ pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .title_top(buttons)
                 .title_bottom(Line::from(help).right_aligned())
                 .border_style(Style::default().fg(Color::Cyan)),
@@ -838,7 +925,6 @@ pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
     // Render scrollbar
     render_focus_scrollbar(frame, area, selected_global, total);
 }
-
 
 // Note: render_error_scrollbar_internal was removed as it's been replaced by render_error_scrollbar_with_state
 
@@ -888,11 +974,8 @@ pub fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         " Search (regex) "
     };
-    let search = Paragraph::new(format!("/{}", app.search_query)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title),
-    );
+    let search = Paragraph::new(format!("/{}", app.search_query))
+        .block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(search, area);
 }
 
@@ -1056,7 +1139,7 @@ h/l         水平左/右滚动     w          切换自动换行
 Shift+H     重置水平滚动
 
 ━━━━━━━━━━━━━━━━━━━━ 搜索过滤 ━━━━━━━━━━━━━━━━━━━━
-/           正则搜索          !term      反向搜索
+/           正则搜索(&为AND)   !term      反向搜索
 Shift+S     高级搜索面板       n/N        下/上一匹配
 t           线程过滤          Shift+T    链路追踪 (traceId)
 1/2/3/4     Info/Warn/Error/Debug
@@ -1127,19 +1210,17 @@ pub fn render_startup_warnings_popup(frame: &mut Frame, app: &App) {
         "启动时存在部分文件访问问题，程序已跳过不可读文件并继续加载。\n\n{}",
         warning_lines.join("\n")
     );
-    let popup = Paragraph::new(content)
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" 启动警告 ")
-                .title_style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .border_style(Style::default().fg(Color::Yellow)),
-        );
+    let popup = Paragraph::new(content).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 启动警告 ")
+            .title_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
     frame.render_widget(popup, area);
 }
 
@@ -1383,18 +1464,21 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
         return;
     }
 
-    let area = centered_rect_with_offset(80, 75, frame.area(), app.popup_offset_x, app.popup_offset_y);
+    let area =
+        centered_rect_with_offset(80, 75, frame.area(), app.popup_offset_x, app.popup_offset_y);
     frame.render_widget(Clear, area);
 
     let entries = &popup.logs;
     let selected = popup.table_state.selected();
     let search_regex = popup.search_regex.as_ref();
+    let search_terms = &popup.search_terms;
     let files = &app.files;
     let horizontal_scroll = app.horizontal_scroll;
     let wrap_lines = app.wrap_lines;
 
     let get_file_color = |source_id: usize| -> Color {
-        files.iter()
+        files
+            .iter()
             .find(|f| f.id == source_id)
             .map(|f| f.color)
             .unwrap_or(Color::White)
@@ -1405,9 +1489,9 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
     // Calculate live match count for search preview
     let live_match_count = if popup.search_mode && !popup.search_query.is_empty() {
         popup.search_query.chars().count();
-        Regex::new(&popup.search_query).ok().map(|re| {
-            popup.logs.iter().filter(|e| e.matches_search(&re)).count()
-        })
+        Regex::new(&popup.search_query)
+            .ok()
+            .map(|re| popup.logs.iter().filter(|e| e.matches_search(&re)).count())
     } else {
         None
     };
@@ -1435,13 +1519,15 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let file_color = e.get_source_id()
+            let file_color = e
+                .get_source_id()
                 .map(|sid| get_file_color(sid))
                 .unwrap_or(Color::White);
             let idx = Some(i + 1);
             render_list_item(
                 e,
                 search_regex,
+                search_terms,
                 false,
                 false,
                 file_color,
@@ -1461,7 +1547,11 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
-                .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .title_bottom(Line::from(help).right_aligned())
                 .border_style(Style::default().fg(Color::Magenta)),
         )
@@ -1477,9 +1567,8 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
 
     // Copy input overlay
     if popup.copy_mode {
-        let copy_area = centered_rect_with_offset(
-            40, 15, frame.area(), app.popup_offset_x, app.popup_offset_y,
-        );
+        let copy_area =
+            centered_rect_with_offset(40, 15, frame.area(), app.popup_offset_x, app.popup_offset_y);
         frame.render_widget(Clear, copy_area);
         let display_text = if popup.copy_input.is_empty() {
             if let Some(feedback) = &popup.copy_feedback {
@@ -1497,14 +1586,17 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
             .copy_feedback
             .as_deref()
             .unwrap_or("复制行号 (Enter复制 | Esc返回 | Alt+方向键移动 | Ctrl+0复位)");
-        let input = Paragraph::new(Line::from(display_text))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
-                    .title(format!(" {} ", copy_title))
-                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            );
+        let input = Paragraph::new(Line::from(display_text)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(format!(" {} ", copy_title))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        );
         frame.render_widget(input, copy_area);
         frame.set_cursor_position((
             copy_area.x + popup.copy_input.len() as u16 + 1,
@@ -1525,8 +1617,8 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
                 3,
             );
             frame.render_widget(Clear, search_area);
-        let search_text = format!("/{}", popup.search_query);
-        let search_bar = Paragraph::new(search_text)
+            let search_text = format!("/{}", popup.search_query);
+            let search_bar = Paragraph::new(search_text)
                 .style(Style::default().fg(Color::Yellow))
                 .block(
                     Block::default()
@@ -1534,20 +1626,73 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
                         .title(" Search ")
                         .border_style(Style::default().fg(Color::Yellow)),
                 );
-        frame.render_widget(search_bar, search_area);
+            frame.render_widget(search_bar, search_area);
             let cursor_x = (search_area.x + 2 + popup.search_query.chars().count() as u16)
                 .min(search_area.x + search_area.width.saturating_sub(2));
-        frame.set_cursor_position((
-                cursor_x,
-                search_area.y + 1,
-        ));
+            frame.set_cursor_position((cursor_x, search_area.y + 1));
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_for_tui_display;
+    use super::{
+        apply_search_highlights, collect_active_search_regexes, sanitize_for_tui_display, Span,
+        Style,
+    };
+    use crate::models::{DisplayEntry, LogEntry, LogLevelKind};
+    use ratatui::prelude::Color;
+    use regex::Regex;
+
+    fn make_entry(content: &str) -> DisplayEntry {
+        let tid = "1234".to_string();
+        DisplayEntry::Normal(LogEntry {
+            timestamp: "2026-04-02 10:00:00.000".to_string(),
+            pid: "1".to_string(),
+            tid: tid.clone(),
+            level: "INFO".to_string(),
+            content: content.to_string(),
+            source_file: "unit.rs".to_string(),
+            line_num: 1,
+            json_payload: None,
+            delta_ms: None,
+            source_id: 0,
+            line_index: 0,
+            level_kind: LogLevelKind::Info,
+            source_file_lower: "unit.rs".to_string(),
+            searchable_text: LogEntry::build_searchable_text(content, "unit.rs", &tid),
+        })
+    }
+
+    #[test]
+    fn apply_search_highlights_marks_all_and_terms() {
+        let spans = vec![Span::styled("error and timeout", Style::default())];
+        let r1 = Regex::new("error").unwrap();
+        let r2 = Regex::new("timeout").unwrap();
+        let highlighted = apply_search_highlights(spans, &[&r1, &r2]);
+
+        let highlighted_count = highlighted
+            .iter()
+            .filter(|s| s.style.bg == Some(Color::Yellow))
+            .count();
+        assert!(highlighted_count >= 2);
+    }
+
+    #[test]
+    fn and_terms_highlight_only_when_all_terms_match_entry() {
+        let entry = make_entry("this is only");
+        let terms = vec![Regex::new("is").unwrap(), Regex::new("error").unwrap()];
+        let active = collect_active_search_regexes(&entry, None, &terms);
+        assert!(active.is_empty());
+    }
+
+    #[test]
+    fn and_terms_highlight_when_all_terms_match_entry() {
+        let entry = make_entry("this is error message");
+        let terms = vec![Regex::new("is").unwrap(), Regex::new("error").unwrap()];
+        let active = collect_active_search_regexes(&entry, None, &terms);
+        assert_eq!(active.len(), 2);
+    }
 
     #[test]
     fn sanitize_replaces_tab_with_spaces() {

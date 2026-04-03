@@ -69,9 +69,7 @@ impl TailState {
         let result: Vec<LogEntry> = lines
             .iter()
             .enumerate()
-            .filter_map(|(i, b)| {
-                parse_line(&decode_line(b), b, re, source_id, base_line + i + 1)
-            })
+            .filter_map(|(i, b)| parse_line(&decode_line(b), b, re, source_id, base_line + i + 1))
             .collect();
         self.line_counts.insert(source_id, base_line + lines.len());
         result

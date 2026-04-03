@@ -8,6 +8,85 @@ use chrono::{DateTime, Local};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+/// Parsed regex query representation.
+///
+/// `Single` means one regex must match; `And` means all regexes must match.
+#[derive(Debug, Clone)]
+pub enum ParsedRegexQuery {
+    Single(Regex),
+    And(Vec<Regex>),
+}
+
+/// Split a regex query by unescaped `&` (AND delimiter).
+///
+/// Returns `None` when no unescaped `&` delimiter exists.
+/// Empty terms around delimiters are ignored.
+pub fn split_unescaped_and_terms(pattern: &str) -> Option<Vec<String>> {
+    let mut has_delimiter = false;
+    let mut escaped = false;
+    let mut current = String::new();
+    let mut terms = Vec::new();
+
+    for ch in pattern.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            current.push(ch);
+            continue;
+        }
+
+        if ch == '&' {
+            has_delimiter = true;
+            let term = current.trim();
+            if !term.is_empty() {
+                terms.push(term.to_string());
+            }
+            current.clear();
+            continue;
+        }
+
+        current.push(ch);
+    }
+
+    let term = current.trim();
+    if !term.is_empty() {
+        terms.push(term.to_string());
+    }
+
+    if has_delimiter {
+        Some(terms)
+    } else {
+        None
+    }
+}
+
+/// Parse a regex query.
+///
+/// - No `&`: compile as a single regex.
+/// - Has unescaped `&`: compile as AND terms.
+pub fn parse_regex_query(pattern: &str) -> Result<ParsedRegexQuery, regex::Error> {
+    if let Some(terms) = split_unescaped_and_terms(pattern) {
+        let mut compiled = Vec::new();
+        for term in terms {
+            compiled.push(Regex::new(&term)?);
+        }
+        if compiled.is_empty() {
+            Ok(ParsedRegexQuery::And(Vec::new()))
+        } else if compiled.len() == 1 {
+            Ok(ParsedRegexQuery::Single(compiled.remove(0)))
+        } else {
+            Ok(ParsedRegexQuery::And(compiled))
+        }
+    } else {
+        Ok(ParsedRegexQuery::Single(Regex::new(pattern)?))
+    }
+}
+
 /// Log level enum for type-safe level filtering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LogLevel {
@@ -110,11 +189,17 @@ impl SearchCriteria {
             && self.levels.is_empty()
     }
 
-    /// Build compiled regex from content_regex string
-    pub fn compile_content_regex(&self) -> Option<Regex> {
-        self.content_regex
-            .as_ref()
-            .and_then(|p| Regex::new(p).ok())
+    /// Build compiled regex query from content_regex string.
+    pub fn compile_content_query(&self) -> Option<ParsedRegexQuery> {
+        self.content_regex.as_ref().and_then(|p| {
+            parse_regex_query(p).ok().and_then(|query| {
+                if matches!(&query, ParsedRegexQuery::And(terms) if terms.is_empty()) {
+                    None
+                } else {
+                    Some(query)
+                }
+            })
+        })
     }
 
     /// Builder method: set start time
@@ -198,5 +283,31 @@ mod tests {
         assert!(!criteria.is_empty());
         assert_eq!(criteria.content_regex, Some("test".to_string()));
         assert_eq!(criteria.levels, vec![LogLevel::Error]);
+    }
+
+    #[test]
+    fn parse_regex_query_builds_and_terms() {
+        let query = parse_regex_query(r"error & timeout").unwrap();
+        match query {
+            ParsedRegexQuery::And(terms) => assert_eq!(terms.len(), 2),
+            ParsedRegexQuery::Single(_) => panic!("expected AND terms"),
+        }
+    }
+
+    #[test]
+    fn split_unescaped_and_terms_uses_ampersand_delimiter() {
+        let terms = split_unescaped_and_terms(r"error & timeout").unwrap();
+        assert_eq!(terms, vec!["error".to_string(), "timeout".to_string()]);
+    }
+
+    #[test]
+    fn split_unescaped_and_terms_keeps_space_when_no_ampersand() {
+        // Spaces should remain part of a single regex term.
+        assert_eq!(split_unescaped_and_terms("error timeout"), None);
+    }
+
+    #[test]
+    fn split_unescaped_and_terms_supports_escaped_ampersand() {
+        assert_eq!(split_unescaped_and_terms(r"error\&timeout"), None);
     }
 }

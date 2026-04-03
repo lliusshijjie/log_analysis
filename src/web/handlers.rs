@@ -1,8 +1,4 @@
-use axum::{
-    extract::State,
-    response::Html,
-    Json,
-};
+use axum::{extract::State, response::Html, Json};
 
 use crate::models::DashboardStats;
 use crate::web::state::WebSharedState;

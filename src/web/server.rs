@@ -1,7 +1,4 @@
-use axum::{
-    routing::get,
-    Router,
-};
+use axum::{routing::get, Router};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::web::handlers::{get_dashboard_html, get_stats};
@@ -27,7 +24,5 @@ pub async fn start_web_server(shared_state: WebSharedState) {
         .await
         .expect("Failed to bind to address");
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    axum::serve(listener, app).await.expect("Server error");
 }

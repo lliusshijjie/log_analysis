@@ -18,10 +18,16 @@ pub fn render_history(frame: &mut Frame, app: &mut App, area: Rect) {
             };
 
             let line = Line::from(vec![
-                Span::styled(format!("{:>3} ", i + 1), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:>3} ", i + 1),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(&entry.timestamp, Style::default().fg(Color::Cyan)),
                 Span::raw(" "),
-                Span::styled(type_str, Style::default().fg(type_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    type_str,
+                    Style::default().fg(type_color).add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" "),
                 Span::styled(&entry.content, Style::default().fg(Color::White)),
             ]);
@@ -37,7 +43,11 @@ pub fn render_history(frame: &mut Frame, app: &mut App, area: Rect) {
                 .title(format!(" 📜 Command History ({}) ", app.history.len()))
                 .title_bottom(" Enter:执行 | Delete:删除 | c:清空 | Esc:返回 "),
         )
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let mut state = ListState::default();
     state.select(Some(app.history.selected));

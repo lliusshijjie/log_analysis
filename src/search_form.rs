@@ -218,7 +218,8 @@ impl SearchFormState {
     /// Select previous template in list
     pub fn prev_template(&mut self) {
         if !self.template_list.is_empty() {
-            self.template_selected = self.template_selected
+            self.template_selected = self
+                .template_selected
                 .checked_sub(1)
                 .unwrap_or(self.template_list.len() - 1);
         }
@@ -301,11 +302,11 @@ mod tests {
     fn test_current_input_mut() {
         let mut form = SearchFormState::new();
         form.focused_field = FormField::Content;
-        
+
         if let Some(input) = form.current_input_mut() {
             input.push_str("test");
         }
-        
+
         assert_eq!(form.content_input, "test");
     }
 }

@@ -130,7 +130,10 @@ pub async fn generate_report(context_json: String) -> Result<String> {
         },
         OllamaMessage {
             role: "user".into(),
-            content: format!("请根据以下统计数据生成报告:\n\n```json\n{}\n```", context_json),
+            content: format!(
+                "请根据以下统计数据生成报告:\n\n```json\n{}\n```",
+                context_json
+            ),
         },
     ];
 

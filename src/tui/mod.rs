@@ -9,4 +9,3 @@ pub mod search_modal;
 pub mod syntax;
 
 pub use runner::run_app;
-

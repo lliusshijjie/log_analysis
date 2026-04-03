@@ -91,7 +91,7 @@ pub fn parse_user_time(input: &str) -> Option<DateTime<Local>> {
 /// - `d` or `day` - days
 fn parse_relative_time(input: &str) -> Option<DateTime<Local>> {
     let input = input.trim();
-    
+
     // Must start with - or +
     if !input.starts_with('-') && !input.starts_with('+') {
         return None;
@@ -172,7 +172,10 @@ mod tests {
         let result = parse_user_time("2024-01-15 10:30:45.123");
         assert!(result.is_some());
         let dt = result.unwrap();
-        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2024-01-15 10:30:45");
+        assert_eq!(
+            dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2024-01-15 10:30:45"
+        );
     }
 
     #[test]

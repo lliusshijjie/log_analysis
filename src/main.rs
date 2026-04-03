@@ -9,11 +9,11 @@ mod live;
 mod logic;
 mod models;
 mod parser;
+mod report;
 mod search;
 mod search_form;
 mod templates;
 mod time_parser;
-mod report;
 mod tui;
 mod web;
 
@@ -30,11 +30,11 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use glob::glob;
-use walkdir::WalkDir;
 use memmap2::Mmap;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
+use walkdir::WalkDir;
 
 use analytics::compute_dashboard_stats;
 use app_state::App;
@@ -109,7 +109,9 @@ fn main() -> Result<()> {
     let (report_resp_tx, report_resp_rx) = mpsc::channel::<Result<String, String>>(1);
     rt.spawn(async move {
         while let Some(context_json) = report_req_rx.recv().await {
-            let result = ai_client::generate_report(context_json).await.map_err(|e| e.to_string());
+            let result = ai_client::generate_report(context_json)
+                .await
+                .map_err(|e| e.to_string());
             let _ = report_resp_tx.send(result).await;
         }
     });
@@ -120,7 +122,8 @@ fn main() -> Result<()> {
         if let Ok(meta) = std::fs::metadata(path) {
             tail_state.init_offset(id, meta.len());
         }
-        let max_line = raw_entries.iter()
+        let max_line = raw_entries
+            .iter()
             .filter(|e| e.source_id == id)
             .map(|e| e.line_index)
             .max()
@@ -189,8 +192,19 @@ fn main() -> Result<()> {
         #[link(name = "user32")]
         extern "system" {
             fn GetConsoleWindow() -> *mut std::ffi::c_void;
-            fn LoadImageW(hInst: *mut std::ffi::c_void, name: *const u16, type_: u32, cx: i32, cy: i32, fuLoad: u32) -> *mut std::ffi::c_void;
-            fn SetClassLongPtrW(hWnd: *mut std::ffi::c_void, nIndex: i32, dwNewLong: isize) -> isize;
+            fn LoadImageW(
+                hInst: *mut std::ffi::c_void,
+                name: *const u16,
+                type_: u32,
+                cx: i32,
+                cy: i32,
+                fuLoad: u32,
+            ) -> *mut std::ffi::c_void;
+            fn SetClassLongPtrW(
+                hWnd: *mut std::ffi::c_void,
+                nIndex: i32,
+                dwNewLong: isize,
+            ) -> isize;
         }
 
         // Set console window title
@@ -363,9 +377,9 @@ fn read_file_content(path: &Path) -> Result<Vec<u8>> {
         Err(mmap_err) => {
             let mut reader = BufReader::new(file);
             let mut buf = Vec::new();
-            reader.read_to_end(&mut buf).with_context(|| {
-                format!("mmap失败({}) 且回退读取失败: {:?}", mmap_err, path)
-            })?;
+            reader
+                .read_to_end(&mut buf)
+                .with_context(|| format!("mmap失败({}) 且回退读取失败: {:?}", mmap_err, path))?;
             Ok(buf)
         }
     }
@@ -450,10 +464,7 @@ fn load_logs(
                             continue;
                         }
                     }
-                    for entry in WalkDir::new(&dir_path)
-                        .max_depth(1)
-                        .into_iter()
-                    {
+                    for entry in WalkDir::new(&dir_path).max_depth(1).into_iter() {
                         match entry {
                             Ok(e) => {
                                 let path = e.path();

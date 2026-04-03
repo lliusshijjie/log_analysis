@@ -9,9 +9,8 @@
 //! All active conditions must match for an entry to pass the filter.
 
 use crate::models::{DisplayEntry, LogEntry};
-use crate::search::SearchCriteria;
+use crate::search::{ParsedRegexQuery, SearchCriteria};
 use crate::time_parser::parse_log_timestamp;
-use regex::Regex;
 
 /// Filter log entries based on search criteria
 ///
@@ -28,12 +27,12 @@ pub fn filter_logs<'a>(
         return entries.iter().collect();
     }
 
-    // Pre-compile regex for performance
-    let content_re = criteria.compile_content_regex();
+    // Pre-compile regex query for performance
+    let content_query = criteria.compile_content_query();
 
     entries
         .iter()
-        .filter(|entry| matches_criteria(entry, criteria, &content_re))
+        .filter(|entry| matches_criteria(entry, criteria, &content_query))
         .collect()
 }
 
@@ -41,19 +40,16 @@ pub fn filter_logs<'a>(
 ///
 /// Same as `filter_logs` but returns owned entries.
 /// Use this when you need to store the filtered result.
-pub fn filter_logs_owned(
-    entries: &[DisplayEntry],
-    criteria: &SearchCriteria,
-) -> Vec<DisplayEntry> {
+pub fn filter_logs_owned(entries: &[DisplayEntry], criteria: &SearchCriteria) -> Vec<DisplayEntry> {
     if criteria.is_empty() {
         return entries.to_vec();
     }
 
-    let content_re = criteria.compile_content_regex();
+    let content_query = criteria.compile_content_query();
 
     entries
         .iter()
-        .filter(|entry| matches_criteria(entry, criteria, &content_re))
+        .filter(|entry| matches_criteria(entry, criteria, &content_query))
         .cloned()
         .collect()
 }
@@ -70,14 +66,14 @@ pub fn filter_indices(
         return indices.to_vec();
     }
 
-    let content_re = criteria.compile_content_regex();
+    let content_query = criteria.compile_content_query();
     indices
         .iter()
         .copied()
         .filter(|&idx| {
             entries
                 .get(idx)
-                .map(|entry| matches_criteria(entry, criteria, &content_re))
+                .map(|entry| matches_criteria(entry, criteria, &content_query))
                 .unwrap_or(false)
         })
         .collect()
@@ -87,19 +83,27 @@ pub fn filter_indices(
 fn matches_criteria(
     entry: &DisplayEntry,
     criteria: &SearchCriteria,
-    content_re: &Option<Regex>,
+    content_query: &Option<ParsedRegexQuery>,
 ) -> bool {
     match entry {
-        DisplayEntry::Normal(log) => matches_log_entry(log, criteria, content_re),
+        DisplayEntry::Normal(log) => matches_log_entry(log, criteria, content_query),
         DisplayEntry::Folded { summary_text, .. } => {
             // For folded entries, only check content regex if present
             // Time and level filters don't apply to folded entries
-            if let Some(re) = content_re {
-                if !re.is_match(summary_text) {
-                    return false;
-                }
+            if !matches_content(summary_text, content_query) {
+                return false;
             }
             true
+        }
+    }
+}
+
+fn matches_content(content: &str, content_query: &Option<ParsedRegexQuery>) -> bool {
+    match content_query {
+        None => true,
+        Some(ParsedRegexQuery::Single(re)) => re.is_match(content),
+        Some(ParsedRegexQuery::And(terms)) => {
+            !terms.is_empty() && terms.iter().all(|re| re.is_match(content))
         }
     }
 }
@@ -111,7 +115,7 @@ fn matches_criteria(
 fn matches_log_entry(
     log: &LogEntry,
     criteria: &SearchCriteria,
-    content_re: &Option<Regex>,
+    content_query: &Option<ParsedRegexQuery>,
 ) -> bool {
     // 1. Time range check - start time (inclusive)
     if let Some(ref start) = criteria.start_time {
@@ -151,19 +155,14 @@ fn matches_log_entry(
 
     // 4. Source file check (case-insensitive contains)
     if let Some(ref source) = criteria.source_file {
-        if !log
-            .source_file_lower
-            .contains(&source.to_ascii_lowercase())
-        {
+        if !log.source_file_lower.contains(&source.to_ascii_lowercase()) {
             return false;
         }
     }
 
     // 5. Content regex check
-    if let Some(ref re) = content_re {
-        if !re.is_match(&log.content) {
-            return false;
-        }
+    if !matches_content(&log.content, content_query) {
+        return false;
     }
 
     // All checks passed
@@ -178,11 +177,11 @@ pub fn count_matching(entries: &[DisplayEntry], criteria: &SearchCriteria) -> us
         return entries.len();
     }
 
-    let content_re = criteria.compile_content_regex();
+    let content_query = criteria.compile_content_query();
 
     entries
         .iter()
-        .filter(|entry| matches_criteria(entry, criteria, &content_re))
+        .filter(|entry| matches_criteria(entry, criteria, &content_query))
         .count()
 }
 
@@ -215,7 +214,12 @@ mod tests {
     fn test_empty_criteria_returns_all() {
         let entries = vec![
             make_test_log("2024-01-15 10:00:00.000", "INFO", "test message", "test.rs"),
-            make_test_log("2024-01-15 10:00:01.000", "ERROR", "error message", "test.rs"),
+            make_test_log(
+                "2024-01-15 10:00:01.000",
+                "ERROR",
+                "error message",
+                "test.rs",
+            ),
         ];
         let criteria = SearchCriteria::default();
         let result = filter_logs(&entries, &criteria);
@@ -255,8 +259,18 @@ mod tests {
     #[test]
     fn test_content_regex_filter() {
         let entries = vec![
-            make_test_log("2024-01-15 10:00:00.000", "INFO", "user login success", "auth.rs"),
-            make_test_log("2024-01-15 10:00:01.000", "ERROR", "database error", "db.rs"),
+            make_test_log(
+                "2024-01-15 10:00:00.000",
+                "INFO",
+                "user login success",
+                "auth.rs",
+            ),
+            make_test_log(
+                "2024-01-15 10:00:01.000",
+                "ERROR",
+                "database error",
+                "db.rs",
+            ),
             make_test_log("2024-01-15 10:00:02.000", "INFO", "user logout", "auth.rs"),
         ];
         let criteria = SearchCriteria {
@@ -265,6 +279,26 @@ mod tests {
         };
         let result = filter_logs(&entries, &criteria);
         assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_content_regex_and_filter_with_ampersand() {
+        let entries = vec![
+            make_test_log(
+                "2024-01-15 10:00:00.000",
+                "INFO",
+                "user login success",
+                "auth.rs",
+            ),
+            make_test_log("2024-01-15 10:00:01.000", "INFO", "user logout", "auth.rs"),
+            make_test_log("2024-01-15 10:00:02.000", "INFO", "login failed", "auth.rs"),
+        ];
+        let criteria = SearchCriteria {
+            content_regex: Some("user & login".to_string()),
+            ..Default::default()
+        };
+        let result = filter_logs(&entries, &criteria);
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -286,7 +320,12 @@ mod tests {
     #[test]
     fn test_combined_filters_and_logic() {
         let entries = vec![
-            make_test_log("2024-01-15 10:00:00.000", "ERROR", "database error", "db.rs"),
+            make_test_log(
+                "2024-01-15 10:00:00.000",
+                "ERROR",
+                "database error",
+                "db.rs",
+            ),
             make_test_log("2024-01-15 10:00:01.000", "ERROR", "auth error", "auth.rs"),
             make_test_log("2024-01-15 10:00:02.000", "INFO", "database info", "db.rs"),
         ];
