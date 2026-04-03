@@ -4,7 +4,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use regex::Regex;
@@ -167,6 +167,32 @@ fn build_advanced_search_summary(criteria: &SearchCriteria) -> Option<String> {
 
 fn is_movable_popup_active(app: &App) -> bool {
     app.search_form.is_open || app.input_mode == InputMode::FocusCopyInput || app.adv_result_popup.is_open
+}
+
+fn handle_horizontal_navigation(app: &mut App, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('h') => {
+            if !app.wrap_lines {
+                app.scroll_horizontal_left(20);
+            }
+            true
+        }
+        KeyCode::Char('l') => {
+            if !app.wrap_lines {
+                app.scroll_horizontal_right(20);
+            }
+            true
+        }
+        KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.reset_horizontal_scroll();
+            true
+        }
+        KeyCode::Char('w') => {
+            app.toggle_wrap_lines();
+            true
+        }
+        _ => false,
+    }
 }
 
 fn apply_advanced_search(app: &mut App, criteria: &SearchCriteria) -> usize {
@@ -729,6 +755,9 @@ pub fn run_app(
                         }
                         continue;
                     }
+                    if handle_horizontal_navigation(app, key) {
+                        continue;
+                    }
                     match key.code {
                         KeyCode::Esc => app.adv_result_popup.close(),
                         KeyCode::Up | KeyCode::Char('k') => app.adv_result_popup.previous(),
@@ -1088,6 +1117,9 @@ pub fn run_app(
                     }
                     // Focus Mode handling
                     if app.current_view == CurrentView::Focus {
+                        if handle_horizontal_navigation(app, key) {
+                            continue;
+                        }
                         match key.code {
                             KeyCode::Esc => {
                                 if !app.focus_go_back() {
@@ -1133,6 +1165,9 @@ pub fn run_app(
                     }
                     // Thread View handling
                     if app.current_view == CurrentView::Thread {
+                        if handle_horizontal_navigation(app, key) {
+                            continue;
+                        }
                         match key.code {
                             KeyCode::Esc => app.exit_thread_view(),
                             KeyCode::Up | KeyCode::Char('k') => app.thread_previous(),
@@ -1223,94 +1258,84 @@ pub fn run_app(
                             KeyCode::Enter => app.solo_file(),
                             _ => {}
                         },
-                        Focus::LogList => match key.code {
-                            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                app.clear_advanced_search()
+                        Focus::LogList => {
+                            if handle_horizontal_navigation(app, key) {
+                                continue;
                             }
-                            KeyCode::Up | KeyCode::Char('k') => app.previous(),
-                            KeyCode::Down | KeyCode::Char('j') => app.next(),
-                            KeyCode::Left => app.previous_page(),
-                            KeyCode::Right => app.next_page(),
-                            KeyCode::Char('g') => app.jump_to_top(),
-                            KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.jump_to_bottom()
-                            }
-                            KeyCode::Char(':') => app.enter_jump_mode(),
-                            KeyCode::Char('/') => app.start_search(),
-                            KeyCode::Enter => {
-                                if key.modifiers.contains(KeyModifiers::ALT) {
-                                    // Alt+Enter: Enter focus mode with current search results
-                                    let query = app.search_regex.as_ref()
-                                        .map(|r| r.as_str().to_string())
-                                        .unwrap_or_else(|| app.search_query.clone());
-                                    app.enter_focus_mode(if query.is_empty() { "全部".to_string() } else { query });
+                            match key.code {
+                                KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                    app.clear_advanced_search()
                                 }
-                            }
-                            KeyCode::Char('n') => app.next_match(),
-                            KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.prev_match()
-                            }
-                            KeyCode::Char('t') => app.toggle_thread_filter(),
-                            KeyCode::Char('T') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.toggle_trace_filter()
-                            }
-                            KeyCode::Esc => {
-                                // Clear search highlights if active
-                                if app.search_regex.is_some() {
-                                    app.clear_search();
-                                } else if app.filter_tid.is_some() || app.filter_trace.is_some() {
-                                    // Only clear filters if they exist
-                                    app.filter_tid = None;
-                                    app.filter_trace = None;
-                                    app.apply_filter();
+                                KeyCode::Up | KeyCode::Char('k') => app.previous(),
+                                KeyCode::Down | KeyCode::Char('j') => app.next(),
+                                KeyCode::Left => app.previous_page(),
+                                KeyCode::Right => app.next_page(),
+                                KeyCode::Char('g') => app.jump_to_top(),
+                                KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.jump_to_bottom()
                                 }
-                            }
-                            KeyCode::Char('c') => app.copy_line(),
-                            KeyCode::Char('y') => app.yank_payload(),
-                            KeyCode::Char('m') => app.toggle_bookmark(),
-                            KeyCode::Char('b') => app.next_bookmark(),
-                            KeyCode::Char('B') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.prev_bookmark()
-                            }
-                            KeyCode::Char('1') => app.toggle_level(1),
-                            KeyCode::Char('2') => app.toggle_level(2),
-                            KeyCode::Char('3') => app.toggle_level(3),
-                            KeyCode::Char('4') => app.toggle_level(4),
-                            KeyCode::Char('a') => {
-                                if matches!(app.ai_state, AiState::Idle) {
-                                    app.enter_ai_prompt_mode();
+                                KeyCode::Char(':') => app.enter_jump_mode(),
+                                KeyCode::Char('/') => app.start_search(),
+                                KeyCode::Enter => {
+                                    if key.modifiers.contains(KeyModifiers::ALT) {
+                                        // Alt+Enter: Enter focus mode with current search results
+                                        let query = app.search_regex.as_ref()
+                                            .map(|r| r.as_str().to_string())
+                                            .unwrap_or_else(|| app.search_query.clone());
+                                        app.enter_focus_mode(if query.is_empty() { "全部".to_string() } else { query });
+                                    }
                                 }
-                            }
-                            KeyCode::Char('p') => app.pin_selected_log(),
-                            KeyCode::Char('f') => app.is_tailing = !app.is_tailing,
-                            KeyCode::Char('e') => app.request_export(ExportType::LogsCsv),
-                            KeyCode::Char('E') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.request_export(ExportType::LogsJson)
-                            }
-                            KeyCode::Char('r') => app.request_export(ExportType::Report),
-                            KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.request_export(ExportType::AiAnalysis)
-                            }
-                            KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.search_form.open();
-                            }
-                            // Horizontal scroll and wrap controls
-                            KeyCode::Char('h') => {
-                                if !app.wrap_lines {
-                                    app.scroll_horizontal_left(5);
+                                KeyCode::Char('n') => app.next_match(),
+                                KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.prev_match()
                                 }
-                            }
-                            KeyCode::Char('l') => {
-                                if !app.wrap_lines {
-                                    app.scroll_horizontal_right(5);
+                                KeyCode::Char('t') => app.toggle_thread_filter(),
+                                KeyCode::Char('T') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.toggle_trace_filter()
                                 }
+                                KeyCode::Esc => {
+                                    // Clear search highlights if active
+                                    if app.search_regex.is_some() {
+                                        app.clear_search();
+                                    } else if app.filter_tid.is_some() || app.filter_trace.is_some() {
+                                        // Only clear filters if they exist
+                                        app.filter_tid = None;
+                                        app.filter_trace = None;
+                                        app.apply_filter();
+                                    }
+                                }
+                                KeyCode::Char('c') => app.copy_line(),
+                                KeyCode::Char('y') => app.yank_payload(),
+                                KeyCode::Char('m') => app.toggle_bookmark(),
+                                KeyCode::Char('b') => app.next_bookmark(),
+                                KeyCode::Char('B') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.prev_bookmark()
+                                }
+                                KeyCode::Char('1') => app.toggle_level(1),
+                                KeyCode::Char('2') => app.toggle_level(2),
+                                KeyCode::Char('3') => app.toggle_level(3),
+                                KeyCode::Char('4') => app.toggle_level(4),
+                                KeyCode::Char('a') => {
+                                    if matches!(app.ai_state, AiState::Idle) {
+                                        app.enter_ai_prompt_mode();
+                                    }
+                                }
+                                KeyCode::Char('p') => app.pin_selected_log(),
+                                KeyCode::Char('f') => app.is_tailing = !app.is_tailing,
+                                KeyCode::Char('e') => app.request_export(ExportType::LogsCsv),
+                                KeyCode::Char('E') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.request_export(ExportType::LogsJson)
+                                }
+                                KeyCode::Char('r') => app.request_export(ExportType::Report),
+                                KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.request_export(ExportType::AiAnalysis)
+                                }
+                                KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.search_form.open();
+                                }
+                                _ => {}
                             }
-                            KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                                app.reset_horizontal_scroll();
-                            }
-                            KeyCode::Char('w') => app.toggle_wrap_lines(),
-                            _ => {}
-                        },
+                        }
                     }
                 }
             }

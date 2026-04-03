@@ -34,4 +34,5 @@ once_cell = "1.21.3"
 dirs = "6"
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
+unicode-width = "0.2"
 

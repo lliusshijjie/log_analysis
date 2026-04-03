@@ -4,6 +4,8 @@ use ratatui::{
 };
 use regex::Regex;
 use serde_json::Value;
+use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 use crate::app_state::App;
 use crate::models::{AiState, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility};
@@ -68,16 +70,63 @@ fn apply_search_highlight(spans: Vec<Span<'static>>, regex: &Regex) -> Vec<Span<
     result
 }
 
-/// Apply horizontal scroll offset to content string
+/// Apply horizontal scroll offset based on terminal display columns
 fn apply_horizontal_scroll(content: &str, offset: usize) -> String {
     if offset == 0 {
         return content.to_string();
     }
-    let chars: Vec<char> = content.chars().collect();
-    if offset >= chars.len() {
-        return String::new();
+    let mut skipped = 0;
+    let mut start_byte = content.len();
+    for (i, ch) in content.char_indices() {
+        if skipped >= offset {
+            start_byte = i;
+            break;
+        }
+        skipped += ch.width().unwrap_or(0);
     }
-    chars[offset..].iter().collect()
+    content[start_byte..].to_string()
+}
+
+/// Truncate a Vec<Span> so that the total display width fits within `max_width` terminal columns.
+fn truncate_spans_to_width(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Span<'static>> {
+    if max_width == 0 {
+        return Vec::new();
+    }
+    let total_width: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+    if total_width <= max_width {
+        return spans;
+    }
+
+    let mut result: Vec<Span<'static>> = Vec::new();
+    let mut remaining = max_width.saturating_sub(1); // reserve 1 column for '…'
+
+    for span in spans {
+        if remaining == 0 {
+            break;
+        }
+        let span_width = UnicodeWidthStr::width(span.content.as_ref());
+        if span_width <= remaining {
+            remaining -= span_width;
+            result.push(span);
+        } else {
+            let mut truncated = String::new();
+            for ch in span.content.chars() {
+                let cw = ch.width().unwrap_or(0);
+                if cw > remaining {
+                    break;
+                }
+                remaining -= cw;
+                truncated.push(ch);
+            }
+            if !truncated.is_empty() {
+                result.push(Span::styled(truncated, span.style));
+            }
+            break;
+        }
+    }
+
+    result.push(Span::styled("…", Style::default().fg(Color::DarkGray)));
+    result
 }
 
 /// Sanitize control characters for stable terminal rendering.
@@ -116,7 +165,7 @@ fn render_list_item(
     let marker = if is_match { "●" } else { " " };
     match entry {
         DisplayEntry::Normal(log) => {
-            // No hard truncation - use full content
+            // Keep rendering stable by sanitizing control characters before styling/truncation.
             let content = sanitize_for_tui_display(&log.content);
             let mut spans: Vec<Span<'static>> = vec![
                 Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
@@ -141,11 +190,8 @@ fn render_list_item(
                 Span::raw(" "),
             ]);
 
-            // Calculate prefix width to know how much space is left for content
-            // Approximately: line_idx(6) + "█ "(2) + bookmark(1) + marker(1) + timestamp(9) + " "(1) + delta(~12) + level(7) + " "(1) = ~40 chars
-            let prefix_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+            let prefix_width: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
 
-            // Apply horizontal scroll to content if wrap is disabled
             let display_content = if !wrap_lines && horizontal_scroll > 0 {
                 apply_horizontal_scroll(&content, horizontal_scroll)
             } else {
@@ -158,21 +204,18 @@ fn render_list_item(
                 .into_iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))
                 .collect();
-            // Apply search regex highlighting on top of syntax highlighting
             if let Some(re) = search_regex {
                 content_spans = apply_search_highlight(content_spans, re);
             }
 
-            // If wrap is enabled and content exceeds available width, truncate visually but show indicator
             if !wrap_lines {
-                // Truncate content to fit available width
-                let content_width = available_width.saturating_sub(prefix_width);
-                let total_chars: usize = content_spans.iter().map(|s| s.content.chars().count()).sum();
-                if total_chars > content_width {
-                    // Add ellipsis indicator if content is scrolled
-                    if horizontal_scroll > 0 {
-                        spans.insert(spans.len(), Span::styled("…", Style::default().fg(Color::Yellow)));
-                    }
+                let content_max = available_width.saturating_sub(prefix_width);
+                if horizontal_scroll > 0 {
+                    spans.push(Span::styled("…", Style::default().fg(Color::Yellow)));
+                    let content_max = content_max.saturating_sub(1);
+                    content_spans = truncate_spans_to_width(content_spans, content_max);
+                } else {
+                    content_spans = truncate_spans_to_width(content_spans, content_max);
                 }
             }
 
@@ -188,19 +231,25 @@ fn render_list_item(
             count,
             summary_text,
             ..
-        } => ListItem::new(Line::from(vec![
-            Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
-            Span::styled("█ ", Style::default().fg(file_color)),
-            Span::styled(bookmark.to_string(), Style::default().fg(Color::Magenta)),
-            Span::styled(marker.to_string(), Style::default().fg(Color::Yellow)),
-            Span::styled(
-                format!("▶ [{} lines] ", count),
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(summary_text.clone(), Style::default().fg(Color::DarkGray)),
-        ])),
+        } => {
+            let mut folded_spans = vec![
+                Span::styled(line_idx, Style::default().fg(Color::DarkGray)),
+                Span::styled("█ ", Style::default().fg(file_color)),
+                Span::styled(bookmark.to_string(), Style::default().fg(Color::Magenta)),
+                Span::styled(marker.to_string(), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!("▶ [{} lines] ", count),
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(summary_text.clone(), Style::default().fg(Color::DarkGray)),
+            ];
+            if !wrap_lines {
+                folded_spans = truncate_spans_to_width(folded_spans, available_width);
+            }
+            ListItem::new(Line::from(folded_spans))
+        }
     }
 }
 
@@ -306,7 +355,7 @@ fn render_detail(entry: Option<&DisplayEntry>) -> Text<'static> {
                 "Content: ",
                 Style::default().fg(Color::Yellow),
             )]));
-            lines.push(Line::from(log.content.clone()));
+            lines.push(Line::from(sanitize_for_tui_display(&log.content)));
             if let Some(json) = &log.json_payload {
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![Span::styled(
@@ -469,12 +518,14 @@ fn render_log_list_with_state(
         } else {
             Style::default()
         };
-        let help = if search_mode {
+        let help = if is_focus_mode {
+            "←/→=翻页  /=搜索  h/l=横向  w=换行  Esc=返回"
+        } else if search_mode {
             "ESC=exit  F6=Focus模式"
         } else if advanced_search_summary.is_some() {
             "Tab=switch Space=toggle Enter=solo F6=Focus模式 Ctrl+K=清除高级搜索"
         } else {
-            "Tab=switch Space=toggle Enter=solo F6=Focus模式"
+            "Tab=switch Space=toggle Enter=solo F6=Focus模式 h/l=横向 w=换行"
         };
         (title, title_style, list_style, help)
     };
@@ -486,6 +537,7 @@ fn render_log_list_with_state(
             .map(|f| f.color)
             .unwrap_or(Color::White)
     };
+    let available_item_width = area.width.saturating_sub(2) as usize;
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -504,7 +556,7 @@ fn render_log_list_with_state(
                 idx,
                 horizontal_scroll,
                 wrap_lines,
-                area.width as usize,
+                available_item_width,
             )
         })
         .collect();
@@ -726,7 +778,8 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
     ]).right_aligned();
 
     // Help text at bottom
-    let help = "←/→=Page Up/Down  / =Search  Esc=Close  c=Copy  e=Export";
+    let help = "←/→=Page Up/Down  / =Search  h/l=横向  w=换行  Esc=Close  c=Copy  e=Export";
+    let available_item_width = area.width.saturating_sub(2) as usize;
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -745,7 +798,7 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 idx,
                 horizontal_scroll,
                 wrap_lines,
-                area.width as usize,
+                available_item_width,
             )
         })
         .collect();
@@ -961,7 +1014,7 @@ F1 日志列表    F2 仪表盘    F3 AI聊天    F4 历史    F5 报告
 
 ━━━━━━━━━━━━━━━━━━━━ 专注模式 (Focus Mode) ━━━━━━━━━━━━━━━━━
 F6          进入专注模式 (仅显示搜索结果)
-Esc         退出专注模式
+ Esc         返回上一层（无上一层时退出）
 e           导出专注视图中的日志
 
 ━━━━━━━━━━━━━━━━━━━━ 导航操作 ━━━━━━━━━━━━━━━━━━━━
@@ -1297,9 +1350,12 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
     } else if !popup.match_indices.is_empty() {
         let current = popup.current_match + 1;
         let total = popup.match_indices.len();
-        format!("↑↓=Navigate ←/→=Page  /=Search  n/N=跳转匹配({}/{})  c=Copy  e=Export  Esc=Close", current, total)
+        format!(
+            "↑↓=Navigate ←/→=Page  h/l=水平  w=换行  /=Search  n/N=跳转匹配({}/{})  c=Copy  e=Export  Esc=Close",
+            current, total
+        )
     } else {
-        "↑↓=Navigate ←/→=Page  /=Search  Esc=Close  c=Copy  e=Export  Alt+方向键=移动".to_string()
+        "↑↓=Navigate ←/→=Page  h/l=水平  w=换行  /=Search  Esc=Close  c=Copy  e=Export  Alt+方向键=移动".to_string()
     };
 
     let items: Vec<ListItem> = entries
