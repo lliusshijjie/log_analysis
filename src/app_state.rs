@@ -456,6 +456,53 @@ pub struct App {
     pub needs_redraw: bool,
 }
 
+/// Default export folder when `paths.export_dir` is unset.
+/// Uses `dirs::download_dir()` when available; otherwise Windows `USERPROFILE\Downloads` or `下载`,
+/// then non-Windows `~/Downloads`, then current directory.
+pub fn default_export_dir() -> PathBuf {
+    if let Some(p) = dirs::download_dir() {
+        if !p.as_os_str().is_empty() {
+            return p;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let base = PathBuf::from(profile);
+            for name in ["Downloads", "下载"] {
+                let cand = base.join(name);
+                if cand.is_dir() {
+                    return cand;
+                }
+            }
+            return base.join("Downloads");
+        }
+        if let (Ok(drive), Ok(home)) = (
+            std::env::var("HOMEDRIVE"),
+            std::env::var("HOMEPATH"),
+        ) {
+            let base = PathBuf::from(drive).join(home);
+            for name in ["Downloads", "下载"] {
+                let cand = base.join(name);
+                if cand.is_dir() {
+                    return cand;
+                }
+            }
+            return base.join("Downloads");
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = dirs::home_dir() {
+            return home.join("Downloads");
+        }
+    }
+
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 impl App {
     pub fn new(
         entries: Vec<DisplayEntry>,
@@ -627,6 +674,31 @@ impl App {
             .filter_map(|&idx| self.all_entries.get(idx))
             .cloned()
             .collect()
+    }
+
+    /// Rows included in main-view export (`e` / `E` / `r`): only the log file highlighted in Files (`▶`).
+    /// Level filters, search, advanced search, and per-file `enabled` still apply before this step.
+    pub fn entries_for_export(&self) -> Vec<DisplayEntry> {
+        let base = self.filtered_entries_owned();
+        let Some(file_idx) = self.file_list_state.selected() else {
+            return base;
+        };
+        let Some(file) = self.files.get(file_idx) else {
+            return base;
+        };
+        let sid = file.id;
+        base
+            .into_iter()
+            .filter(|e| matches!(e, DisplayEntry::Normal(log) if log.source_id == sid))
+            .collect()
+    }
+
+    /// Name of the file row used for export scope (Files list selection).
+    pub fn export_target_file_label(&self) -> Option<String> {
+        self.file_list_state
+            .selected()
+            .and_then(|i| self.files.get(i))
+            .map(|f| f.name.clone())
     }
 
     pub fn filtered_entries_window_content(&self, start: usize, end: usize) -> String {
@@ -1280,12 +1352,12 @@ impl App {
     pub fn get_export_dir(&self) -> PathBuf {
         self.export_path
             .clone()
-            .unwrap_or_else(|| dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")))
+            .unwrap_or_else(default_export_dir)
     }
 
     /// Set export path to default (Downloads folder)
     pub fn set_default_export_path(&mut self) {
-        self.export_path = dirs::download_dir();
+        self.export_path = Some(default_export_dir());
     }
 
     pub fn open_selected_folded_popup(&mut self) -> bool {
@@ -1498,8 +1570,19 @@ impl App {
             }
             let export_dir = self.get_export_dir();
 
-            let filtered_entries = self.filtered_entries_owned();
-            let stats = self.stats.clone();
+            let filtered_entries = self.entries_for_export();
+            let stats = if matches!(export_type, ExportType::Report) {
+                let logs: Vec<LogEntry> = filtered_entries
+                    .iter()
+                    .filter_map(|e| match e {
+                        DisplayEntry::Normal(log) => Some(log.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                compute_dashboard_stats(&logs)
+            } else {
+                self.stats.clone()
+            };
             let chat_history = self.chat_history.clone();
             let export_type_clone = export_type.clone();
             let tx = self.export_tx.clone();

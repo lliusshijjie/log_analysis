@@ -38,7 +38,7 @@ use tokio::sync::mpsc;
 use walkdir::WalkDir;
 
 use analytics::compute_dashboard_stats;
-use app_state::App;
+use app_state::{App, default_export_dir};
 use config::AppConfig;
 use live::TailState;
 use logic::fold_noise;
@@ -78,6 +78,15 @@ fn main() -> Result<()> {
 
     // 2. Load config
     let config = AppConfig::load_from(cli.config.as_deref())?;
+    let config_file = cli
+        .config
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("log_config.toml"));
+    let config_base = config_file
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     // 3. Load and parse log files
     let (entries, raw_entries, files, histogram, file_paths, re, stats, startup_warnings) =
@@ -158,7 +167,14 @@ fn main() -> Result<()> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        app.export_path = Some(PathBuf::from(export_dir));
+        let p = PathBuf::from(export_dir);
+        app.export_path = Some(if p.is_absolute() {
+            p
+        } else {
+            config_base.join(p)
+        });
+    } else {
+        app.export_path = Some(default_export_dir());
     }
 
     // Initialize correlation regexes for trace filtering

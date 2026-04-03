@@ -1374,8 +1374,17 @@ pub fn render_export_popup(frame: &mut Frame, app: &App) {
                 ExportType::Report => "统计报告",
                 ExportType::AiAnalysis => "AI 分析结果",
             };
-            let area = centered_rect(50, 10, frame.area());
+            let area = centered_rect(50, 14, frame.area());
             frame.render_widget(Clear, area);
+            let dir = app.get_export_dir();
+            let dir_display = dir.display().to_string();
+            let scope_text = match export_type {
+                ExportType::AiAnalysis => "内容: 当前 AI 对话".to_string(),
+                _ => match app.export_target_file_label() {
+                    Some(name) => format!("日志范围: Files 列选中「{}」", name),
+                    None => "日志范围: （无选中文件）".to_string(),
+                },
+            };
             let content = vec![
                 Line::from(""),
                 Line::from(vec![
@@ -1386,6 +1395,15 @@ pub fn render_export_popup(frame: &mut Frame, app: &App) {
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
                     ),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("保存目录: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(&dir_display, Style::default().fg(Color::White)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(&scope_text, Style::default().fg(Color::Gray)),
                 ]),
                 Line::from(""),
                 Line::from(vec![
