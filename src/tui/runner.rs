@@ -221,7 +221,7 @@ fn apply_advanced_search(app: &mut App, criteria: &SearchCriteria) -> usize {
             app.thread_view.thread_logs.len()
         }
         _ => {
-            let results = filter_logs_owned(&app.filtered_entries, criteria);
+            let results = filter_logs_owned(&app.filtered_entries_owned(), criteria);
             let summary = build_advanced_search_summary(criteria)
                 .unwrap_or_else(|| "高级搜索".to_string());
             let title = format!("高级搜索: {}", summary);
@@ -369,6 +369,7 @@ pub fn run_app(
                 Ok(s) => AiState::Completed(s),
                 Err(e) => AiState::Error(e),
             };
+            app.needs_redraw = true;
         }
         if let Ok(result) = app.chat_rx.try_recv() {
             match result {
@@ -378,12 +379,14 @@ pub fn run_app(
                     app.ai_state = AiState::Idle;
                 }
             }
+            app.needs_redraw = true;
         }
         if let Ok(result) = app.export_rx.try_recv() {
             app.export_state = match result {
                 ExportResult::Success(filename) => ExportState::Success(filename),
                 ExportResult::Error(e) => ExportState::Error(e),
             };
+            app.needs_redraw = true;
         }
         // Poll report generation result
         if let Ok(result) = app.report_rx.try_recv() {
@@ -395,12 +398,15 @@ pub fn run_app(
                 }
                 Err(e) => app.report_content = format!("生成报告失败: {}", e),
             }
+            app.needs_redraw = true;
         }
         if matches!(app.ai_state, AiState::Loading) && app.current_view == CurrentView::Chat {
             app.tick_spinner();
+            app.needs_redraw = true;
         }
 
         if app.is_tailing {
+            let mut appended = false;
             while let Ok(paths) = file_rx.try_recv() {
                 for changed_path in paths {
                     if let Some((source_id, path)) = file_paths
@@ -412,30 +418,55 @@ pub fn run_app(
                         let new_entries = tail_state.read_new_lines(path, source_id, &re, base_idx);
                         for entry in new_entries {
                             let display = DisplayEntry::Normal(entry);
-                            app.all_entries.push(display.clone());
-                            app.filtered_entries.push(display);
+                            app.all_entries.push(display);
+                            app.filtered_indices.push(app.all_entries.len() - 1);
+                            appended = true;
                         }
                     }
                 }
             }
-            let len = app.filtered_entries.len();
+            let len = app.filtered_len();
             if len > 0 {
                 app.list_state.select(Some(len - 1));
             }
+            if appended {
+                app.update_search_matches();
+                app.error_indices = app
+                    .filtered_indices
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(filtered_idx, &all_idx)| match app.all_entries.get(all_idx) {
+                        Some(DisplayEntry::Normal(log))
+                            if matches!(log.level_kind, crate::models::LogLevelKind::Error) =>
+                        {
+                            Some(filtered_idx)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                app.needs_redraw = true;
+            }
         }
 
-        // Render UI
-        terminal.draw(|f| ui(f, app))?;
+        if app.needs_redraw {
+            terminal.draw(|f| ui(f, app))?;
+            app.needs_redraw = false;
+        }
 
         // Drain all pending key events before next render
         if !event::poll(Duration::from_millis(16))? {
             continue;
         }
         while event::poll(Duration::from_millis(0))? {
-            if let Event::Key(key) = event::read()? {
+            match event::read()? {
+                Event::Resize(_, _) => {
+                    app.needs_redraw = true;
+                }
+                Event::Key(key) => {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
+                app.needs_redraw = true;
 
                 if is_movable_popup_active(app) {
                     if key.modifiers.contains(KeyModifiers::ALT) {
@@ -545,12 +576,8 @@ pub fn run_app(
                             };
                             if let Some(idx) = app.list_state.selected() {
                                 let start = idx.saturating_sub(10);
-                                let end = (idx + 11).min(app.filtered_entries.len());
-                                let context: String = app.filtered_entries[start..end]
-                                    .iter()
-                                    .map(|e| e.get_content())
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
+                                let end = (idx + 11).min(app.filtered_len());
+                                let context = app.filtered_entries_window_content(start, end);
                                 // Use try_send to avoid blocking the UI thread
                                 match app.ai_tx.try_send((context, custom_instruction.clone())) {
                                     Ok(()) => {
@@ -1338,6 +1365,8 @@ pub fn run_app(
                         }
                     }
                 }
+                }
+                _ => {}
             }
         }
     }

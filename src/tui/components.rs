@@ -4,6 +4,7 @@ use ratatui::{
 };
 use regex::Regex;
 use serde_json::Value;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use unicode_width::UnicodeWidthStr;
 use unicode_width::UnicodeWidthChar;
 
@@ -421,13 +422,16 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// Unified render function that accepts all state as parameters
 /// This avoids borrow checker issues when rendering from different contexts
-fn render_log_list_with_state(
+fn render_log_list_with_state<'a, F>(
     frame: &mut Frame,
     area: Rect,
-    entries: &[DisplayEntry],
+    total_entries: usize,
+    entry_at: F,
     selected: Option<usize>,
     match_indices: &[usize],
-    bookmarks: &std::collections::BTreeSet<usize>,
+    match_index_set: Option<&HashSet<usize>>,
+    bookmarks: &BTreeSet<usize>,
+    bookmark_index_set: Option<&HashSet<usize>>,
     error_indices: &[usize],
     is_tailing: bool,
     visible_levels: &LevelVisibility,
@@ -442,7 +446,9 @@ fn render_log_list_with_state(
     horizontal_scroll: usize,
     wrap_lines: bool,
     advanced_search_summary: Option<&str>,
-) {
+) where
+    F: Fn(usize) -> Option<&'a DisplayEntry>,
+{
     let tail_indicator = if is_tailing { "[LIVE] " } else { "" };
 
     // Level filter status
@@ -458,7 +464,7 @@ fn render_log_list_with_state(
         let focus_title = format!(
             " 🔍 FOCUS: {} ({} 条) {} [Esc退出]",
             focus_query,
-            entries.len(),
+            total_entries,
             level_status
         );
         (
@@ -491,7 +497,7 @@ fn render_log_list_with_state(
             ),
             (None, None, None) => format!(
                 " {}Logs ({}) {} ",
-                tail_indicator, entries.len(), level_status
+                tail_indicator, total_entries, level_status
             ),
         };
         if let Some(summary) = advanced_search_summary {
@@ -530,39 +536,55 @@ fn render_log_list_with_state(
         (title, title_style, list_style, help)
     };
 
-    // Helper to get file color
-    let get_file_color = |source_id: usize| -> Color {
-        files.iter()
-            .find(|f| f.id == source_id)
-            .map(|f| f.color)
-            .unwrap_or(Color::White)
-    };
+    let file_color_map: HashMap<usize, Color> = files.iter().map(|f| (f.id, f.color)).collect();
     let available_item_width = area.width.saturating_sub(2) as usize;
+    let total = total_entries;
+    let visible_rows = area.height.saturating_sub(2) as usize;
 
-    let items: Vec<ListItem> = entries
-        .iter()
-        .enumerate()
-        .map(|(i, e)| {
+    let selected_global = selected.and_then(|s| (s < total).then_some(s));
+    let start = if total == 0 || visible_rows == 0 {
+        0
+    } else {
+        let selected_idx = selected_global.unwrap_or(0);
+        let centered = selected_idx.saturating_sub(visible_rows / 2);
+        let max_start = total.saturating_sub(visible_rows);
+        centered.min(max_start)
+    };
+    let end = if total == 0 || visible_rows == 0 {
+        0
+    } else {
+        (start + visible_rows).min(total)
+    };
+
+    let items: Vec<ListItem> = (start..end)
+        .filter_map(|i| {
+            let e = entry_at(i)?;
             let file_color = e.get_source_id()
-                .map(|sid| get_file_color(sid))
+                .and_then(|sid| file_color_map.get(&sid).copied())
                 .unwrap_or(Color::White);
             let idx = if is_focus_mode { Some(i + 1) } else { None };
-            render_list_item(
+            let is_match = match_index_set
+                .map(|set| set.contains(&i))
+                .unwrap_or_else(|| match_indices.contains(&i));
+            let is_bookmarked = bookmark_index_set
+                .map(|set| set.contains(&i))
+                .unwrap_or_else(|| bookmarks.contains(&i));
+            Some(render_list_item(
                 e,
                 search_regex.as_ref(),
-                match_indices.contains(&i),
-                bookmarks.contains(&i),
+                is_match,
+                is_bookmarked,
                 file_color,
                 idx,
                 horizontal_scroll,
                 wrap_lines,
                 available_item_width,
-            )
+            ))
         })
         .collect();
 
     let mut list_state = ListState::default();
-    list_state.select(selected);
+    list_state.select(selected_global.map(|s| s.saturating_sub(start)));
 
     let list = List::new(items)
         .block(
@@ -583,9 +605,9 @@ fn render_log_list_with_state(
 
     // Custom scrollbar with error markers (only in normal mode)
     if !is_focus_mode {
-        render_error_scrollbar_with_state(frame, area, &list_state, entries.len(), error_indices);
+        render_error_scrollbar_with_state(frame, area, selected_global, total, error_indices);
     } else {
-        render_focus_scrollbar(frame, area, &list_state, entries.len());
+        render_focus_scrollbar(frame, area, selected_global, total);
     }
 }
 
@@ -593,7 +615,7 @@ fn render_log_list_with_state(
 fn render_error_scrollbar_with_state(
     frame: &mut Frame,
     area: Rect,
-    list_state: &ListState,
+    selected: Option<usize>,
     total: usize,
     error_indices: &[usize],
 ) {
@@ -606,7 +628,7 @@ fn render_error_scrollbar_with_state(
     let track_start_y = area.y + 1;
 
     let visible_rows = track_height;
-    let selected = list_state.selected().unwrap_or(0);
+    let selected = selected.unwrap_or(0);
 
     // Calculate thumb position and size based on visible window
     let thumb_size = ((visible_rows * track_height) / total.max(1))
@@ -646,114 +668,76 @@ fn render_error_scrollbar_with_state(
 }
 
 /// Render log list using app state (convenience wrapper for normal mode)
-pub fn render_log_list_from_app(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Clone the data we need for rendering
-    let entries = app.entries().to_vec();
-    let match_indices = app.match_indices.clone();
-    let bookmarks = app.bookmarks.clone();
-    let error_indices = app.error_indices.clone();
-
-    // Extract display data
-    let is_tailing = app.is_tailing;
-    let visible_levels = app.visible_levels.clone();
-    let filter_tid = app.filter_tid.clone();
-    let filter_trace = app.filter_trace.clone();
-    let search_regex = app.search_regex.clone();
-    let focus = app.focus;
-    let search_mode = app.search_mode;
-    let files = app.files.clone();
-    let horizontal_scroll = app.horizontal_scroll;
-    let wrap_lines = app.wrap_lines;
-    let advanced_search_summary = app.advanced_search_summary.clone();
-
-    // Get the list state
+pub fn render_log_list_from_app(frame: &mut Frame, app: &App, area: Rect) {
     let selected = app.list_state.selected();
-
-    // Render the list
     render_log_list_with_state(
         frame,
         area,
-        &entries,
+        app.filtered_len(),
+        |i| app.filtered_entry(i),
         selected,
-        &match_indices,
-        &bookmarks,
-        &error_indices,
-        is_tailing,
-        &visible_levels,
-        &filter_tid,
-        &filter_trace,
-        &search_regex,
-        focus,
-        search_mode,
-        &files,
+        &app.match_indices,
+        Some(&app.match_index_set),
+        &app.bookmarks,
+        Some(&app.bookmark_index_set),
+        &app.error_indices,
+        app.is_tailing,
+        &app.visible_levels,
+        &app.filter_tid,
+        &app.filter_trace,
+        &app.search_regex,
+        app.focus,
+        app.search_mode,
+        &app.files,
         false,
         "",
-        horizontal_scroll,
-        wrap_lines,
-        advanced_search_summary.as_deref(),
+        app.horizontal_scroll,
+        app.wrap_lines,
+        app.advanced_search_summary.as_deref(),
     );
 }
 
 /// Render log list in focus mode
-pub fn render_focus_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Clone the data we need for rendering
-    let entries = app.focus_mode.focus_logs.clone();
-    let bookmarks = app.bookmarks.clone();
-    let focus_query = app.focus_mode.focus_query.clone();
-    let visible_levels = app.visible_levels.clone();
-    let files = app.files.clone();
-    let horizontal_scroll = app.horizontal_scroll;
-    let wrap_lines = app.wrap_lines;
-
-    // Get the list state
+pub fn render_focus_list(frame: &mut Frame, app: &App, area: Rect) {
     let selected = app.focus_mode.focus_table_state.selected();
 
     // Render the focus list (empty match_indices to hide yellow dots)
     render_log_list_with_state(
         frame,
         area,
-        &entries,
+        app.focus_mode.focus_logs.len(),
+        |i| app.focus_mode.focus_logs.get(i),
         selected,
         &[], // No match indices in focus mode - all entries are matches
-        &bookmarks,
+        None,
+        &app.bookmarks,
+        Some(&app.bookmark_index_set),
         &[], // No error indices in focus mode
         false, // Not tailing
-        &visible_levels,
+        &app.visible_levels,
         &None, // No filter_tid in focus mode
         &None, // No filter_trace in focus mode
         &None, // No search_regex in focus mode
         Focus::LogList, // Always use log list focus in focus mode
         false, // Not search mode
-        &files,
+        &app.files,
         true, // Is focus mode
-        &focus_query,
-        horizontal_scroll,
-        wrap_lines,
+        &app.focus_mode.focus_query,
+        app.horizontal_scroll,
+        app.wrap_lines,
         None,
     );
 }
 
 /// Render log list in thread view mode
-pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Clone the data we need for rendering
-    let entries = app.thread_view.thread_logs.clone();
-    let bookmarks = app.bookmarks.clone();
-    let thread_id = app.thread_view.thread_id.clone();
+pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
+    let entries = &app.thread_view.thread_logs;
+    let thread_id = &app.thread_view.thread_id;
     let zoom_level = app.thread_view.zoom_level;
-    let files = app.files.clone();
-    let horizontal_scroll = app.horizontal_scroll;
-    let wrap_lines = app.wrap_lines;
+    let file_color_map: HashMap<usize, Color> = app.files.iter().map(|f| (f.id, f.color)).collect();
 
     // Get the list state
     let selected = app.thread_view.thread_table_state.selected();
-
-    // Helper to get file color
-    let get_file_color = |source_id: usize| -> Color {
-        files.iter()
-            .find(|f| f.id == source_id)
-            .map(|f| f.color)
-            .unwrap_or(Color::White)
-    };
 
     // Title with thread ID and top-right buttons
     let title = format!(
@@ -780,31 +764,46 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
     // Help text at bottom
     let help = "←/→=Page Up/Down  / =Search  h/l=横向  w=换行  Esc=Close  c=Copy  e=Export";
     let available_item_width = area.width.saturating_sub(2) as usize;
+    let total = entries.len();
+    let visible_rows = area.height.saturating_sub(2) as usize;
+    let selected_global = selected.and_then(|s| (s < total).then_some(s));
+    let start = if total == 0 || visible_rows == 0 {
+        0
+    } else {
+        let selected_idx = selected_global.unwrap_or(0);
+        let centered = selected_idx.saturating_sub(visible_rows / 2);
+        let max_start = total.saturating_sub(visible_rows);
+        centered.min(max_start)
+    };
+    let end = if total == 0 || visible_rows == 0 {
+        0
+    } else {
+        (start + visible_rows).min(total)
+    };
 
-    let items: Vec<ListItem> = entries
-        .iter()
-        .enumerate()
-        .map(|(i, e)| {
+    let items: Vec<ListItem> = (start..end)
+        .map(|i| {
+            let e = &entries[i];
             let file_color = e.get_source_id()
-                .map(|sid| get_file_color(sid))
+                .and_then(|sid| file_color_map.get(&sid).copied())
                 .unwrap_or(Color::White);
             let idx = Some(i + 1);
             render_list_item(
                 e,
                 None, // No search regex in thread view initially
                 false, // Not a match
-                bookmarks.contains(&i),
+                app.bookmark_index_set.contains(&i),
                 file_color,
                 idx,
-                horizontal_scroll,
-                wrap_lines,
+                app.horizontal_scroll,
+                app.wrap_lines,
                 available_item_width,
             )
         })
         .collect();
 
     let mut list_state = ListState::default();
-    list_state.select(selected);
+    list_state.select(selected_global.map(|s| s.saturating_sub(start)));
 
     let list = List::new(items)
         .block(
@@ -825,14 +824,14 @@ pub fn render_thread_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut list_state);
 
     // Render scrollbar
-    render_focus_scrollbar(frame, area, &list_state, entries.len());
+    render_focus_scrollbar(frame, area, selected_global, total);
 }
 
 
 // Note: render_error_scrollbar_internal was removed as it's been replaced by render_error_scrollbar_with_state
 
 /// Render a simplified scrollbar for focus mode
-fn render_focus_scrollbar(frame: &mut Frame, area: Rect, list_state: &ListState, total: usize) {
+fn render_focus_scrollbar(frame: &mut Frame, area: Rect, selected: Option<usize>, total: usize) {
     if total == 0 || area.height < 4 {
         return;
     }
@@ -842,7 +841,7 @@ fn render_focus_scrollbar(frame: &mut Frame, area: Rect, list_state: &ListState,
     let track_start_y = area.y + 1;
 
     let visible_rows = track_height;
-    let selected = list_state.selected().unwrap_or(0);
+    let selected = selected.unwrap_or(0);
 
     // Calculate thumb position and size
     let thumb_size = ((visible_rows * track_height) / total.max(1))
@@ -1333,7 +1332,7 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
     let live_match_count = if popup.search_mode && !popup.search_query.is_empty() {
         popup.search_query.chars().count();
         Regex::new(&popup.search_query).ok().map(|re| {
-            popup.logs.iter().filter(|e| re.is_match(&e.get_searchable_text())).count()
+            popup.logs.iter().filter(|e| e.matches_search(&re)).count()
         })
     } else {
         None
@@ -1400,7 +1399,7 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut list_state);
 
-    render_focus_scrollbar(frame, area, &list_state, entries.len());
+    render_focus_scrollbar(frame, area, selected, entries.len());
 
     // Copy input overlay
     if popup.copy_mode {

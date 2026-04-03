@@ -102,7 +102,7 @@ cargo run -- file1.log file2.log file3.log
 | `k` / `j` | Nav | Vim-style up/down |
 | `g` / `G` | Nav | Jump to Top / Jump to Bottom |
 | `:` | Nav | **Jump to specific line number** |
-| `h` / `l` | Scroll | Horizontal scroll left/right (5 chars) |
+| `h` / `l` | Scroll | Horizontal scroll left/right (20 chars) |
 | `Shift+H` | Scroll | Reset horizontal scroll to start |
 | `w` | Display | **Toggle word wrap mode** |
 | `F1` | View | **Log List View** |

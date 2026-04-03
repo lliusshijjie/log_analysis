@@ -32,6 +32,7 @@ impl LogLevel {
     }
 
     /// Check if a level string matches this LogLevel
+    #[allow(dead_code)]
     pub fn matches(&self, level_str: &str) -> bool {
         let lower = level_str.to_lowercase();
         match self {

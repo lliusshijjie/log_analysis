@@ -58,6 +58,31 @@ pub fn filter_logs_owned(
         .collect()
 }
 
+/// Filter an index slice over a shared entries array.
+///
+/// Returns positions from `indices` that satisfy `criteria`, avoiding cloning log entries.
+pub fn filter_indices(
+    entries: &[DisplayEntry],
+    indices: &[usize],
+    criteria: &SearchCriteria,
+) -> Vec<usize> {
+    if criteria.is_empty() {
+        return indices.to_vec();
+    }
+
+    let content_re = criteria.compile_content_regex();
+    indices
+        .iter()
+        .copied()
+        .filter(|&idx| {
+            entries
+                .get(idx)
+                .map(|entry| matches_criteria(entry, criteria, &content_re))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
 /// Check if a single entry matches all active criteria
 fn matches_criteria(
     entry: &DisplayEntry,
@@ -109,7 +134,16 @@ fn matches_log_entry(
 
     // 3. Level check - entry must match at least one of the specified levels
     if !criteria.levels.is_empty() {
-        let matches_level = criteria.levels.iter().any(|level| level.matches(&log.level));
+        let matches_level = criteria.levels.iter().any(|level| {
+            use crate::search::LogLevel;
+            matches!(
+                (level, log.level_kind),
+                (LogLevel::Info, crate::models::LogLevelKind::Info)
+                    | (LogLevel::Warn, crate::models::LogLevelKind::Warn)
+                    | (LogLevel::Error, crate::models::LogLevelKind::Error)
+                    | (LogLevel::Debug, crate::models::LogLevelKind::Debug)
+            )
+        });
         if !matches_level {
             return false;
         }
@@ -118,9 +152,8 @@ fn matches_log_entry(
     // 4. Source file check (case-insensitive contains)
     if let Some(ref source) = criteria.source_file {
         if !log
-            .source_file
-            .to_lowercase()
-            .contains(&source.to_lowercase())
+            .source_file_lower
+            .contains(&source.to_ascii_lowercase())
         {
             return false;
         }
@@ -157,13 +190,13 @@ pub fn count_matching(entries: &[DisplayEntry], criteria: &SearchCriteria) -> us
 mod tests {
     use super::*;
     use crate::search::LogLevel;
-    use serde_json::Value;
 
     fn make_test_log(timestamp: &str, level: &str, content: &str, source: &str) -> DisplayEntry {
+        let tid = "5678".to_string();
         DisplayEntry::Normal(LogEntry {
             timestamp: timestamp.to_string(),
             pid: "1234".to_string(),
-            tid: "5678".to_string(),
+            tid: tid.clone(),
             level: level.to_string(),
             content: content.to_string(),
             source_file: source.to_string(),
@@ -172,6 +205,9 @@ mod tests {
             delta_ms: None,
             source_id: 0,
             line_index: 0,
+            level_kind: crate::models::LogLevelKind::from_level(level),
+            source_file_lower: source.to_ascii_lowercase(),
+            searchable_text: LogEntry::build_searchable_text(content, source, &tid),
         })
     }
 

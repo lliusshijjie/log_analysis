@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::mpsc as std_mpsc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 use regex::Regex;
 use tokio::sync::mpsc;
 
-use crate::filtering::filter_logs_owned;
+use crate::filtering::filter_indices;
 use crate::history::HistoryManager;
 use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
@@ -262,7 +262,7 @@ impl AdvancedResultPopup {
         self.match_indices.clear();
         if let Some(re) = &self.search_regex {
             for (i, entry) in self.logs.iter().enumerate() {
-                if re.is_match(&entry.get_searchable_text()) {
+                if entry.matches_search(re) {
                     self.match_indices.push(i);
                 }
             }
@@ -294,7 +294,7 @@ impl AdvancedResultPopup {
 
 pub struct App {
     pub all_entries: Vec<DisplayEntry>,
-    pub filtered_entries: Vec<DisplayEntry>,
+    pub filtered_indices: Vec<usize>,
     pub raw_entries: Vec<LogEntry>, // Original unfurled entries for thread view
     pub list_state: ListState,
     pub focus_mode: FocusModeState,
@@ -307,6 +307,7 @@ pub struct App {
     pub search_regex: Option<Regex>,
     pub negative_search: bool,
     pub match_indices: Vec<usize>,
+    pub match_index_set: HashSet<usize>,
     pub current_match: usize,
     pub status_msg: Option<(String, Instant)>,
     pub clipboard: Option<Clipboard>,
@@ -319,6 +320,7 @@ pub struct App {
     pub export_rx: std_mpsc::Receiver<ExportResult>,
     pub export_tx: std_mpsc::Sender<ExportResult>,
     pub bookmarks: BTreeSet<usize>,
+    pub bookmark_index_set: HashSet<usize>,
     pub visible_levels: LevelVisibility,
     pub show_help: bool,
     pub files: Vec<FileInfo>,
@@ -360,6 +362,7 @@ pub struct App {
     pub report_tx: mpsc::Sender<String>,
     pub report_rx: mpsc::Receiver<Result<String, String>>,
     pub report_cache: ReportCache,
+    pub needs_redraw: bool,
 }
 
 impl App {
@@ -389,7 +392,7 @@ impl App {
         let error_indices = Self::compute_error_indices(&entries);
         Self {
             all_entries: entries.clone(),
-            filtered_entries: entries,
+            filtered_indices: (0..entries.len()).collect(),
             raw_entries,
             list_state,
             focus_mode: FocusModeState::new(),
@@ -402,6 +405,7 @@ impl App {
             search_regex: None,
             negative_search: false,
             match_indices: Vec::new(),
+            match_index_set: HashSet::new(),
             current_match: 0,
             status_msg: None,
             clipboard: Clipboard::new().ok(),
@@ -414,6 +418,7 @@ impl App {
             export_rx,
             export_tx,
             bookmarks: BTreeSet::new(),
+            bookmark_index_set: HashSet::new(),
             visible_levels: LevelVisibility::default(),
             show_help: false,
             files,
@@ -448,6 +453,7 @@ impl App {
             report_tx,
             report_rx,
             report_cache: ReportCache::load(),
+            needs_redraw: true,
         }
     }
 
@@ -462,12 +468,50 @@ impl App {
             .collect()
     }
 
-    pub fn entries(&self) -> &Vec<DisplayEntry> {
-        &self.filtered_entries
+    fn compute_error_indices_from_indices(&self) -> Vec<usize> {
+        self.filtered_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(filtered_idx, &all_idx)| match self.all_entries.get(all_idx) {
+                Some(DisplayEntry::Normal(log))
+                    if matches!(log.level_kind, crate::models::LogLevelKind::Error) =>
+                {
+                    Some(filtered_idx)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn filtered_len(&self) -> usize {
+        self.filtered_indices.len()
+    }
+
+    pub fn filtered_entry(&self, filtered_idx: usize) -> Option<&DisplayEntry> {
+        self.filtered_indices
+            .get(filtered_idx)
+            .and_then(|&idx| self.all_entries.get(idx))
+    }
+
+    pub fn filtered_entries_owned(&self) -> Vec<DisplayEntry> {
+        self.filtered_indices
+            .iter()
+            .filter_map(|&idx| self.all_entries.get(idx))
+            .cloned()
+            .collect()
+    }
+
+    pub fn filtered_entries_window_content(&self, start: usize, end: usize) -> String {
+        self.filtered_indices[start..end]
+            .iter()
+            .filter_map(|&idx| self.all_entries.get(idx))
+            .map(|e| e.get_content())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn next(&mut self) {
-        let len = self.filtered_entries.len();
+        let len = self.filtered_indices.len();
         if len == 0 {
             return;
         }
@@ -480,7 +524,7 @@ impl App {
     }
 
     pub fn previous(&mut self) {
-        if self.filtered_entries.is_empty() {
+        if self.filtered_indices.is_empty() {
             return;
         }
         let i = self
@@ -492,7 +536,7 @@ impl App {
     }
 
     pub fn next_page(&mut self) {
-        let len = self.filtered_entries.len();
+        let len = self.filtered_indices.len();
         if len == 0 {
             return;
         }
@@ -505,7 +549,7 @@ impl App {
     }
 
     pub fn previous_page(&mut self) {
-        if self.filtered_entries.is_empty() {
+        if self.filtered_indices.is_empty() {
             return;
         }
         let i = self
@@ -554,7 +598,7 @@ impl App {
     pub fn selected_entry(&self) -> Option<&DisplayEntry> {
         self.list_state
             .selected()
-            .and_then(|i| self.filtered_entries.get(i))
+            .and_then(|i| self.filtered_entry(i))
     }
 
     /// Load correlation regex patterns from config
@@ -619,25 +663,25 @@ impl App {
     }
 
     pub fn apply_filter(&mut self) {
-        let enabled_files: Vec<usize> = self
+        let enabled_files: HashSet<usize> = self
             .files
             .iter()
             .filter(|f| f.enabled)
             .map(|f| f.id)
             .collect();
-        self.filtered_entries = self
+        let mut filtered_indices: Vec<usize> = self
             .all_entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| {
+            .filter_map(|(idx, e)| {
                 if let Some(sid) = e.get_source_id() {
                     if !enabled_files.contains(&sid) {
-                        return false;
+                        return None;
                     }
                 }
                 if let Some(tid) = &self.filter_tid {
                     if e.get_tid() != Some(tid) {
-                        return false;
+                        return None;
                     }
                 }
                 if let Some(trace_id) = &self.filter_trace {
@@ -645,41 +689,42 @@ impl App {
                         if !log.content.contains(trace_id.as_str())
                             && !log.tid.contains(trace_id.as_str())
                         {
-                            return false;
+                            return None;
                         }
                     } else {
-                        return false;
+                        return None;
                     }
                 }
                 if let DisplayEntry::Normal(log) = e {
-                    let level = log.level.to_lowercase();
-                    if level.contains("info") && !self.visible_levels.info {
-                        return false;
+                    use crate::models::LogLevelKind;
+                    if matches!(log.level_kind, LogLevelKind::Info) && !self.visible_levels.info {
+                        return None;
                     }
-                    if level.contains("warn") && !self.visible_levels.warn {
-                        return false;
+                    if matches!(log.level_kind, LogLevelKind::Warn) && !self.visible_levels.warn {
+                        return None;
                     }
-                    if level.contains("error") && !self.visible_levels.error {
-                        return false;
+                    if matches!(log.level_kind, LogLevelKind::Error) && !self.visible_levels.error {
+                        return None;
                     }
-                    if level.contains("debug") && !self.visible_levels.debug {
-                        return false;
+                    if matches!(log.level_kind, LogLevelKind::Debug) && !self.visible_levels.debug {
+                        return None;
                     }
                 }
-                true
+                Some(idx)
             })
-            .map(|(_, e)| e.clone())
             .collect();
         if let Some(criteria) = &self.advanced_search_criteria {
-            self.filtered_entries = filter_logs_owned(&self.filtered_entries, criteria);
+            filtered_indices = filter_indices(&self.all_entries, &filtered_indices, criteria);
         }
-        self.list_state.select(if self.filtered_entries.is_empty() {
+        self.filtered_indices = filtered_indices;
+        self.list_state.select(if self.filtered_indices.is_empty() {
             None
         } else {
             Some(0)
         });
         self.update_search_matches();
-        self.error_indices = Self::compute_error_indices(&self.filtered_entries);
+        self.error_indices = self.compute_error_indices_from_indices();
+        self.needs_redraw = true;
     }
 
     pub fn clear_advanced_search(&mut self) {
@@ -714,6 +759,8 @@ impl App {
         self.search_mode = false;
         self.search_regex = None;
         self.match_indices.clear();
+        self.match_index_set.clear();
+        self.needs_redraw = true;
     }
 
     pub fn update_search(&mut self) {
@@ -734,16 +781,22 @@ impl App {
 
     pub fn update_search_matches(&mut self) {
         self.match_indices.clear();
+        self.match_index_set.clear();
         if let Some(re) = &self.search_regex {
-            for (i, entry) in self.filtered_entries.iter().enumerate() {
-                let matches = re.is_match(&entry.get_searchable_text());
+            for (i, &all_idx) in self.filtered_indices.iter().enumerate() {
+                let Some(entry) = self.all_entries.get(all_idx) else {
+                    continue;
+                };
+                let matches = entry.matches_search(re);
                 if self.negative_search {
                     if !matches {
                         self.match_indices.push(i);
+                        self.match_index_set.insert(i);
                     }
                 } else {
                     if matches {
                         self.match_indices.push(i);
+                        self.match_index_set.insert(i);
                     }
                 }
             }
@@ -756,6 +809,7 @@ impl App {
         } else {
             self.status_msg = Some(("No Result".into(), Instant::now()));
         }
+        self.needs_redraw = true;
     }
 
     pub fn next_match(&mut self) {
@@ -783,8 +837,12 @@ impl App {
         if let Some(idx) = self.list_state.selected() {
             if !self.bookmarks.remove(&idx) {
                 self.bookmarks.insert(idx);
+                self.bookmark_index_set.insert(idx);
+            } else {
+                self.bookmark_index_set.remove(&idx);
             }
         }
+        self.needs_redraw = true;
     }
 
     pub fn next_bookmark(&mut self) {
@@ -928,30 +986,34 @@ impl App {
 
     pub fn submit_jump(&mut self) {
         if let Ok(line_num) = self.input_buffer.parse::<usize>() {
-            if let Some(idx) = self
-                .filtered_entries
-                .iter()
-                .position(|e| e.get_line_index() == Some(line_num))
-            {
+            if let Some(idx) = self.filtered_indices.iter().position(|&all_idx| {
+                self.all_entries
+                    .get(all_idx)
+                    .and_then(DisplayEntry::get_line_index)
+                    == Some(line_num)
+            }) {
                 self.list_state.select(Some(idx));
             } else {
                 self.status_msg = Some(("Line not found".into(), Instant::now()));
             }
         }
         self.exit_jump_mode();
+        self.needs_redraw = true;
     }
 
     pub fn jump_to_top(&mut self) {
-        if !self.filtered_entries.is_empty() {
+        if !self.filtered_indices.is_empty() {
             self.list_state.select(Some(0));
         }
+        self.needs_redraw = true;
     }
 
     pub fn jump_to_bottom(&mut self) {
-        let len = self.filtered_entries.len();
+        let len = self.filtered_indices.len();
         if len > 0 {
             self.list_state.select(Some(len - 1));
         }
+        self.needs_redraw = true;
     }
 
     pub fn enter_ai_prompt_mode(&mut self) {
@@ -1051,7 +1113,7 @@ impl App {
         if let ExportState::Confirm(export_type) = self.export_state.clone() {
             self.export_state = ExportState::Exporting(export_type.clone());
 
-            let filtered_entries = self.filtered_entries.clone();
+            let filtered_entries = self.filtered_entries_owned();
             let stats = self.stats.clone();
             let chat_history = self.chat_history.clone();
             let export_type_clone = export_type.clone();
@@ -1087,8 +1149,13 @@ impl App {
             CommandType::Jump => {
                 self.current_view = CurrentView::Logs;
                 if let Ok(line) = entry.content.parse::<u32>() {
-                    for (i, e) in self.filtered_entries.iter().enumerate() {
-                        if e.get_line_num() == Some(line) {
+                    for (i, &all_idx) in self.filtered_indices.iter().enumerate() {
+                        if self
+                            .all_entries
+                            .get(all_idx)
+                            .and_then(DisplayEntry::get_line_num)
+                            == Some(line)
+                        {
                             self.list_state.select(Some(i));
                             break;
                         }
@@ -1107,12 +1174,13 @@ impl App {
     /// Enter focus mode with the current search query
     /// Creates a filtered view containing only matching log lines
     pub fn enter_focus_mode(&mut self, query: String) {
+        let filtered_entries = self.filtered_entries_owned();
         // Clone the matching entries to focus_logs
         self.focus_mode.focus_logs = if let Some(re) = &self.search_regex {
-            self.filtered_entries
+            filtered_entries
                 .iter()
                 .filter(|e| {
-                    let matches = re.is_match(&e.get_searchable_text());
+                    let matches = e.matches_search(re);
                     if self.negative_search {
                         !matches
                     } else {
@@ -1123,7 +1191,7 @@ impl App {
                 .collect()
         } else {
             // If no search regex, enter focus mode with all currently filtered entries
-            self.filtered_entries.clone()
+            filtered_entries
         };
 
         // Store original focus logs for sub-search
@@ -1144,6 +1212,7 @@ impl App {
 
         // Switch to focus view
         self.current_view = CurrentView::Focus;
+        self.needs_redraw = true;
     }
 
     /// Update search within focus mode - filters original_focus_logs
@@ -1162,7 +1231,7 @@ impl App {
             let filtered: Vec<DisplayEntry> = self.focus_mode.original_focus_logs
                 .iter()
                 .filter(|e| {
-                    let matches = re.is_match(&e.get_searchable_text());
+                    let matches = e.matches_search(&re);
                     if negative { !matches } else { matches }
                 })
                 .cloned()
@@ -1181,6 +1250,7 @@ impl App {
         }
         self.focus_mode.focus_match_indices = (0..self.focus_mode.focus_logs.len()).collect();
         self.focus_mode.focus_current_match = 0;
+        self.needs_redraw = true;
     }
 
     /// Go back one level in focus mode history; returns false if no history left
@@ -1259,7 +1329,7 @@ impl App {
                     .original_thread_logs
                     .iter()
                     .filter(|e| {
-                        let matches = re.is_match(&e.get_searchable_text());
+                        let matches = e.matches_search(&re);
                         if negative { !matches } else { matches }
                     })
                     .cloned()
@@ -1271,6 +1341,7 @@ impl App {
         if !self.thread_view.thread_logs.is_empty() {
             self.thread_view.thread_table_state.select(Some(0));
         }
+        self.needs_redraw = true;
     }
 
     /// Navigation methods for thread view
@@ -1353,11 +1424,14 @@ impl App {
 
     /// Get the current entries based on view mode
     #[allow(dead_code)]
-    pub fn get_current_entries(&self) -> &[DisplayEntry] {
+    pub fn get_current_entries(&self) -> Vec<&DisplayEntry> {
         if self.is_focus_mode() {
-            &self.focus_mode.focus_logs
+            self.focus_mode.focus_logs.iter().collect()
         } else {
-            &self.filtered_entries
+            self.filtered_indices
+                .iter()
+                .filter_map(|&idx| self.all_entries.get(idx))
+                .collect()
         }
     }
 
@@ -1382,7 +1456,7 @@ impl App {
         } else {
             self.list_state
                 .selected()
-                .and_then(|i| self.filtered_entries.get(i))
+                .and_then(|i| self.filtered_entry(i))
         }
     }
 

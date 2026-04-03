@@ -8,7 +8,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::config::ParserConfig;
-use crate::models::LogEntry;
+use crate::models::{LogEntry, LogLevelKind};
 
 pub fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
     NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S%.3f").ok()
@@ -28,18 +28,25 @@ pub fn parse_line(
     line_index: usize,
 ) -> Option<LogEntry> {
     let caps = re.captures(line)?;
+    let level = caps.get(4)?.as_str();
+    let content = caps.get(5)?.as_str();
+    let source_file = caps.get(6)?.as_str();
+    let tid = caps.get(3)?.as_str();
     Some(LogEntry {
         timestamp: caps.get(1)?.as_str().into(),
         pid: caps.get(2)?.as_str().into(),
-        tid: caps.get(3)?.as_str().into(),
-        level: caps.get(4)?.as_str().into(),
-        content: caps.get(5)?.as_str().into(),
-        source_file: caps.get(6)?.as_str().into(),
+        tid: tid.into(),
+        level: level.into(),
+        content: content.into(),
+        source_file: source_file.into(),
         line_num: caps.get(7)?.as_str().parse().ok()?,
         json_payload: extract_json_from_bytes(line_bytes),
         delta_ms: None,
         source_id,
         line_index,
+        level_kind: LogLevelKind::from_level(level),
+        source_file_lower: source_file.to_ascii_lowercase(),
+        searchable_text: LogEntry::build_searchable_text(content, source_file, tid),
     })
 }
 

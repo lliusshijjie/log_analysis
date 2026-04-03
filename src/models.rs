@@ -1,4 +1,5 @@
 use ratatui::prelude::Color;
+use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -45,6 +46,50 @@ pub struct LogEntry {
     pub delta_ms: Option<i64>,
     pub source_id: usize,
     pub line_index: usize,
+    #[serde(skip_serializing)]
+    pub level_kind: LogLevelKind,
+    #[serde(skip_serializing)]
+    pub source_file_lower: String,
+    #[serde(skip_serializing)]
+    pub searchable_text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevelKind {
+    Info,
+    Warn,
+    Error,
+    Debug,
+    Other,
+}
+
+impl LogLevelKind {
+    pub fn from_level(level: &str) -> Self {
+        let level_lower = level.to_ascii_lowercase();
+        if level_lower.contains("error") {
+            Self::Error
+        } else if level_lower.contains("warn") {
+            Self::Warn
+        } else if level_lower.contains("debug") {
+            Self::Debug
+        } else if level_lower.contains("info") {
+            Self::Info
+        } else {
+            Self::Other
+        }
+    }
+}
+
+impl LogEntry {
+    pub fn build_searchable_text(content: &str, source_file: &str, tid: &str) -> String {
+        let mut text = String::with_capacity(content.len() + source_file.len() + tid.len() + 2);
+        text.push_str(content);
+        text.push(' ');
+        text.push_str(source_file);
+        text.push(' ');
+        text.push_str(tid);
+        text
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -65,12 +110,17 @@ impl DisplayEntry {
             _ => None,
         }
     }
-    pub fn get_searchable_text(&self) -> String {
+    pub fn searchable_text(&self) -> &str {
         match self {
-            DisplayEntry::Normal(log) => format!("{} {} {}", log.content, log.source_file, log.tid),
-            DisplayEntry::Folded { summary_text, .. } => summary_text.clone(),
+            DisplayEntry::Normal(log) => log.searchable_text.as_str(),
+            DisplayEntry::Folded { summary_text, .. } => summary_text.as_str(),
         }
     }
+
+    pub fn matches_search(&self, re: &Regex) -> bool {
+        re.is_match(self.searchable_text())
+    }
+
     /// Reserved for future use (e.g., performance analysis display)
     #[allow(dead_code)]
     pub fn get_delta_ms(&self) -> Option<i64> {
