@@ -35,3 +35,7 @@ ip_color = "Cyan"
 url_color = "Blue"
 path_color = "Yellow"
 page_size = 30
+
+[paths]
+# Export output directory. Defaults to Windows Downloads when omitted.
+# export_dir = "C:\\Users\\your_user\\Downloads"

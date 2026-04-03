@@ -175,6 +175,7 @@ Generates `log_config.toml` on first run:
 - **fold_rules**: Custom noise folding rules.
 - **ignore_patterns**: Regex to skip loading specific lines.
 - **theme**: Latency thresholds and colors.
+- **paths.export_dir**: Optional export directory; defaults to Windows Downloads if omitted.
 
 ## 8. User Guide
 

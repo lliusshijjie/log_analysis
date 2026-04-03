@@ -192,6 +192,7 @@ cargo run -- file1.log file2.log file3.log
 - **fold_rules**: 折叠规则（可配置匹配类型和模式）
 - **ignore_patterns**: 预解析过滤正则（匹配的日志行不会被加载）
 - **theme**: 慢日志阈值、语法高亮颜色和翻页行数 (`page_size`，默认 50)
+- **paths.export_dir**: 导出文件目录（可选）；未配置时默认使用 Windows 下载目录
 
 ### 语法高亮
 日志内容会自动高亮显示：

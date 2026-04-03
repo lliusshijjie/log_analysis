@@ -5,7 +5,9 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use regex::Regex;
@@ -293,7 +295,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                 frame.render_widget(Clear, popup_area);
                 let display_text = if app.focus_mode.copy_input.is_empty() {
                     Span::styled(
-                        "请输入行号, 如: 1-5, 3, 7-10, *",
+                        "请输入行号，如1-5，3，7-10，*/a/all",
                         Style::default().fg(Color::DarkGray),
                     )
                 } else {
@@ -303,7 +305,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(Color::Cyan))
-                        .title(" 复制行号 (Alt+方向键移动 | Ctrl+0复位) ")
+                        .title(" 复制行号 - 请输入行号，如1-5，3，7-10，*/a/all ")
                         .title_style(
                             Style::default()
                                 .fg(Color::Cyan)
@@ -336,7 +338,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                 frame.render_widget(Clear, popup_area);
                 let display_text = if app.thread_view.copy_input.is_empty() {
                     Span::styled(
-                        "请输入行号, 如: 1-5, 3, 7-10, *",
+                        "请输入行号，如1-5，3，7-10，*/a/all",
                         Style::default().fg(Color::DarkGray),
                     )
                 } else {
@@ -346,7 +348,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(Color::Cyan))
-                        .title(" 复制行号 (Alt+方向键移动 | Ctrl+0复位) ")
+                        .title(" 复制行号 - 请输入行号，如1-5，3，7-10，*/a/all ")
                         .title_style(
                             Style::default()
                                 .fg(Color::Cyan)
@@ -489,6 +491,27 @@ pub fn run_app(
             match event::read()? {
                 Event::Resize(_, _) => {
                     app.needs_redraw = true;
+                }
+                Event::Mouse(mouse_event) => {
+                    let supports_swipe = app.adv_result_popup.is_open
+                        || matches!(
+                            app.current_view,
+                            CurrentView::Logs | CurrentView::Focus | CurrentView::Thread
+                        );
+                    if !supports_swipe {
+                        continue;
+                    }
+                    match mouse_event.kind {
+                        MouseEventKind::ScrollLeft if !app.wrap_lines => {
+                            app.scroll_horizontal_left(20);
+                            app.needs_redraw = true;
+                        }
+                        MouseEventKind::ScrollRight if !app.wrap_lines => {
+                            app.scroll_horizontal_right(20);
+                            app.needs_redraw = true;
+                        }
+                        _ => {}
+                    }
                 }
                 Event::Key(key) => {
                     if key.kind != KeyEventKind::Press {
@@ -1166,6 +1189,14 @@ pub fn run_app(
                                     Focus::FileList
                                 } else {
                                     Focus::LogList
+                                };
+                                if app.focus == Focus::FileList {
+                                    if let Some(selected) = app.file_list_state.selected() {
+                                        let per_page = app.files_per_page.max(1);
+                                        app.file_page = (selected / per_page) + 1;
+                                    } else {
+                                        app.file_page = 1;
+                                    }
                                 }
                             }
                             KeyCode::Char('?') => app.show_help = true,
@@ -1449,6 +1480,8 @@ pub fn run_app(
                                             .map(|i| i.saturating_sub(1))
                                             .unwrap_or(0);
                                         app.file_list_state.select(Some(i));
+                                        let per_page = app.files_per_page.max(1);
+                                        app.file_page = (i / per_page) + 1;
                                     }
                                 }
                                 KeyCode::Down | KeyCode::Char('j') => {
@@ -1460,8 +1493,12 @@ pub fn run_app(
                                             .map(|i| (i + 1).min(len - 1))
                                             .unwrap_or(0);
                                         app.file_list_state.select(Some(i));
+                                        let per_page = app.files_per_page.max(1);
+                                        app.file_page = (i / per_page) + 1;
                                     }
                                 }
+                                KeyCode::Left => app.file_prev_page(),
+                                KeyCode::Right => app.file_next_page(),
                                 KeyCode::Char(' ') => app.toggle_file(),
                                 KeyCode::Enter => app.solo_file(),
                                 _ => {}

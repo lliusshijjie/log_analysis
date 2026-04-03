@@ -25,6 +25,7 @@ use std::sync::mpsc as std_mpsc;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -150,6 +151,15 @@ fn main() -> Result<()> {
         startup_warnings,
     );
     app.stats = stats.clone();
+    if let Some(export_dir) = config
+        .paths
+        .export_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        app.export_path = Some(PathBuf::from(export_dir));
+    }
 
     // Initialize correlation regexes for trace filtering
     app.load_correlation_patterns(&config.filters.correlation_patterns);
@@ -177,6 +187,7 @@ fn main() -> Result<()> {
     // 7. Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     // 7.1 Set console window title and icon (Windows only)
@@ -265,6 +276,7 @@ fn main() -> Result<()> {
     // 9. Restore terminal (always runs)
     drop(watcher);
     disable_raw_mode()?;
+    stdout().execute(DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
 
     result

@@ -1203,22 +1203,64 @@ impl App {
         if self.files.is_empty() {
             return 0;
         }
-        (self.files.len() + self.files_per_page - 1) / self.files_per_page
+        let per_page = self.files_per_page.max(1);
+        (self.files.len() + per_page - 1) / per_page
     }
 
     /// Navigate to previous page in file list
     pub fn file_prev_page(&mut self) {
-        if self.file_page > 1 {
-            self.file_page -= 1;
+        let total = self.file_total_pages();
+        if total == 0 {
+            self.file_page = 1;
+            self.file_list_state.select(None);
+            return;
         }
+
+        let per_page = self.files_per_page.max(1);
+        let current_page = self.file_page.clamp(1, total);
+        if current_page <= 1 {
+            return;
+        }
+
+        let current_start = (current_page - 1) * per_page;
+        let selected = self.file_list_state.selected().unwrap_or(current_start);
+        let row_offset = selected.saturating_sub(current_start);
+
+        let new_page = current_page - 1;
+        let new_start = (new_page - 1) * per_page;
+        let new_end_exclusive = (new_start + per_page).min(self.files.len());
+        let new_selected = (new_start + row_offset).min(new_end_exclusive.saturating_sub(1));
+
+        self.file_page = new_page;
+        self.file_list_state.select(Some(new_selected));
     }
 
     /// Navigate to next page in file list
     pub fn file_next_page(&mut self) {
         let total = self.file_total_pages();
-        if self.file_page < total {
-            self.file_page += 1;
+        if total == 0 {
+            self.file_page = 1;
+            self.file_list_state.select(None);
+            return;
         }
+
+        let per_page = self.files_per_page.max(1);
+        let current_page = self.file_page.clamp(1, total);
+        if current_page >= total {
+            return;
+        }
+
+        let current_start = (current_page - 1) * per_page;
+        let selected = self.file_list_state.selected().unwrap_or(current_start);
+        let row_offset = selected.saturating_sub(current_start);
+
+        let new_page = current_page + 1;
+        let new_start = (new_page - 1) * per_page;
+        let new_end_exclusive = (new_start + per_page).min(self.files.len());
+        let new_selected = (new_start + row_offset).min(new_end_exclusive.saturating_sub(1));
+
+        self.file_page = new_page;
+        self.file_list_state.select(Some(new_selected));
     }
 
     /// Get the range of file indices for the current page
@@ -1227,17 +1269,18 @@ impl App {
         if total == 0 {
             return 0..0;
         }
-        let current_page = self.file_page.min(total);
-        let start = (current_page - 1) * self.files_per_page;
-        let end = (start + self.files_per_page).min(self.files.len());
+        let per_page = self.files_per_page.max(1);
+        let current_page = self.file_page.clamp(1, total);
+        let start = (current_page - 1) * per_page;
+        let end = (start + per_page).min(self.files.len());
         start..end
     }
 
     /// Get the effective export directory, defaulting to Downloads folder
     pub fn get_export_dir(&self) -> PathBuf {
-        self.export_path.clone().unwrap_or_else(|| {
-            dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
-        })
+        self.export_path
+            .clone()
+            .unwrap_or_else(|| dirs::download_dir().unwrap_or_else(|| PathBuf::from(".")))
     }
 
     /// Set export path to default (Downloads folder)

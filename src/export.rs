@@ -1,9 +1,9 @@
 use anyhow::Result;
 use chrono::Local;
 use serde::Serialize;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::models::{ChatMessage, DashboardStats, DisplayEntry, ExportType};
 
@@ -12,7 +12,7 @@ pub fn generate_filename(prefix: &str, extension: &str) -> String {
     format!("{}_export_{}.{}", prefix, timestamp, extension)
 }
 
-pub fn export_logs_to_csv(entries: &[DisplayEntry], export_dir: &PathBuf) -> Result<String> {
+pub fn export_logs_to_csv(entries: &[DisplayEntry], export_dir: &Path) -> Result<String> {
     let filename = generate_filename("logs", "csv");
     let filepath = export_dir.join(&filename);
     let mut file = File::create(&filepath)?;
@@ -41,7 +41,7 @@ pub fn export_logs_to_csv(entries: &[DisplayEntry], export_dir: &PathBuf) -> Res
         }
     }
 
-    Ok(filename)
+    Ok(filepath.display().to_string())
 }
 
 #[derive(Serialize)]
@@ -68,7 +68,7 @@ fn normalize_content_json(content: &str) -> serde_json::Value {
     }
 }
 
-pub fn export_logs_to_json(entries: &[DisplayEntry], export_dir: &PathBuf) -> Result<String> {
+pub fn export_logs_to_json(entries: &[DisplayEntry], export_dir: &Path) -> Result<String> {
     let filename = generate_filename("logs", "json");
     let filepath = export_dir.join(&filename);
     let mut file = File::create(&filepath)?;
@@ -97,7 +97,7 @@ pub fn export_logs_to_json(entries: &[DisplayEntry], export_dir: &PathBuf) -> Re
     let json = serde_json::to_string_pretty(&logs)?;
     file.write_all(json.as_bytes())?;
 
-    Ok(filename)
+    Ok(filepath.display().to_string())
 }
 
 #[cfg(test)]
@@ -162,7 +162,11 @@ struct SourceSummary {
     error_count: usize,
 }
 
-pub fn export_report(entries: &[DisplayEntry], stats: &DashboardStats, export_dir: &PathBuf) -> Result<String> {
+pub fn export_report(
+    entries: &[DisplayEntry],
+    stats: &DashboardStats,
+    export_dir: &Path,
+) -> Result<String> {
     let filename = generate_filename("report", "json");
     let filepath = export_dir.join(&filename);
     let mut file = File::create(&filepath)?;
@@ -197,7 +201,7 @@ pub fn export_report(entries: &[DisplayEntry], stats: &DashboardStats, export_di
     let json = serde_json::to_string_pretty(&report)?;
     file.write_all(json.as_bytes())?;
 
-    Ok(filename)
+    Ok(filepath.display().to_string())
 }
 
 fn extract_error_patterns(entries: &[DisplayEntry]) -> Vec<ErrorSummary> {
@@ -322,7 +326,7 @@ struct AnalysisResult {
     context_logs_count: usize,
 }
 
-pub fn export_ai_analysis(chat_history: &[ChatMessage], export_dir: &PathBuf) -> Result<String> {
+pub fn export_ai_analysis(chat_history: &[ChatMessage], export_dir: &Path) -> Result<String> {
     let filename = generate_filename("ai_analysis", "json");
     let filepath = export_dir.join(&filename);
     let mut file = File::create(&filepath)?;
@@ -362,7 +366,7 @@ pub fn export_ai_analysis(chat_history: &[ChatMessage], export_dir: &PathBuf) ->
     let json = serde_json::to_string_pretty(&data)?;
     file.write_all(json.as_bytes())?;
 
-    Ok(filename)
+    Ok(filepath.display().to_string())
 }
 
 pub fn perform_export(
@@ -370,8 +374,9 @@ pub fn perform_export(
     entries: &[DisplayEntry],
     stats: &DashboardStats,
     chat_history: &[ChatMessage],
-    export_dir: &PathBuf,
+    export_dir: &Path,
 ) -> Result<String> {
+    fs::create_dir_all(export_dir)?;
     match export_type {
         ExportType::LogsCsv => export_logs_to_csv(entries, export_dir),
         ExportType::LogsJson => export_logs_to_json(entries, export_dir),

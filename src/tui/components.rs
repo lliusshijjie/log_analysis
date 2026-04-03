@@ -468,7 +468,12 @@ fn render_detail(entry: Option<&DisplayEntry>) -> Text<'static> {
                 "Content: ",
                 Style::default().fg(Color::Yellow),
             )]));
-            lines.push(Line::from(sanitize_for_tui_display(&log.content)));
+            let content_text = if log.raw_content.is_empty() {
+                log.content.clone()
+            } else {
+                crate::parser::decode_line(&log.raw_content)
+            };
+            lines.push(Line::from(sanitize_for_tui_display(&content_text)));
             if let Some(json) = &log.json_payload {
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![Span::styled(
@@ -503,10 +508,30 @@ fn render_detail(entry: Option<&DisplayEntry>) -> Text<'static> {
 }
 
 pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
+    let total_pages = app.file_total_pages();
+    if total_pages > 0 && app.file_page > total_pages {
+        app.file_page = total_pages;
+    }
+    if app.files.is_empty() {
+        app.file_page = 1;
+        app.file_list_state.select(None);
+    }
+
+    let page_range = app.file_page_range();
+    if let Some(selected) = app.file_list_state.selected() {
+        if selected < page_range.start || selected >= page_range.end {
+            app.file_list_state.select(page_range.clone().next());
+        }
+    }
+
     let file_items: Vec<ListItem> = app
         .files
         .iter()
+        .enumerate()
+        .skip(page_range.start)
+        .take(page_range.end.saturating_sub(page_range.start))
         .map(|f| {
+            let f = f.1;
             let mark = if f.marked { "[●] " } else { "    " };
             let mark_color = if f.marked {
                 Color::Cyan
@@ -524,16 +549,32 @@ pub fn render_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         Style::default()
     };
+    let current_page = if total_pages == 0 {
+        1
+    } else {
+        app.file_page.clamp(1, total_pages)
+    };
+    let page_text = format!(" Page {}/{} ", current_page, total_pages.max(1));
+    let mut view_state = ListState::default();
+    let local_selected = app.file_list_state.selected().and_then(|global_idx| {
+        if global_idx >= page_range.start && global_idx < page_range.end {
+            Some(global_idx - page_range.start)
+        } else {
+            None
+        }
+    });
+    view_state.select(local_selected);
     let file_list = List::new(file_items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Files ")
+                .title_bottom(Line::from(page_text).right_aligned())
                 .border_style(sidebar_style),
         )
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(file_list, area, &mut app.file_list_state);
+    frame.render_stateful_widget(file_list, area, &mut view_state);
 }
 
 /// Unified render function that accepts all state as parameters
@@ -1575,7 +1616,7 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
                 Span::styled(feedback.clone(), Style::default().fg(Color::Yellow))
             } else {
                 Span::styled(
-                    "请输入行号, 如: 1-5, 3, 7-10, * / a / all",
+                    "请输入行号，如1-5，3，7-10，*/a/all",
                     Style::default().fg(Color::DarkGray),
                 )
             }
@@ -1585,7 +1626,7 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
         let copy_title = popup
             .copy_feedback
             .as_deref()
-            .unwrap_or("复制行号 (Enter复制 | Esc返回 | Alt+方向键移动 | Ctrl+0复位)");
+            .unwrap_or("复制行号 - 请输入行号，如1-5，3，7-10，*/a/all");
         let input = Paragraph::new(Line::from(display_text)).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -1661,6 +1702,7 @@ mod tests {
             level_kind: LogLevelKind::Info,
             source_file_lower: "unit.rs".to_string(),
             searchable_text: LogEntry::build_searchable_text(content, "unit.rs", &tid),
+            raw_content: content.as_bytes().to_vec(),
         })
     }
 

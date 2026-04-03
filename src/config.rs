@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub parser: ParserConfig,
     pub filters: FiltersConfig,
     pub theme: ThemeConfig,
+    #[serde(default)]
+    pub paths: PathsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,12 @@ pub struct ThemeConfig {
     pub page_size: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PathsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_dir: Option<String>,
+}
+
 fn default_page_size() -> usize {
     20
 }
@@ -57,6 +65,7 @@ impl Default for AppConfig {
             parser: ParserConfig::default(),
             filters: FiltersConfig::default(),
             theme: ThemeConfig::default(),
+            paths: PathsConfig::default(),
         }
     }
 }
