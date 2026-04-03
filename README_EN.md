@@ -23,6 +23,7 @@ cargo run -- file1.log file2.log file3.log
 ```
 
 ## 3. Core Features
+- **Custom Window Identity**: Console title displays "【☺】LogInsight" with a dedicated LogInsight.ico icon for taskbar and window, improving visibility.
 - **Smart Encoding**: Automatically detects and converts GB18030 encoding (Chinese) and handles nested UTF-8 JSON string escaping.
 - **Enhanced Path Compatibility**: Supports Windows paths with spaces (e.g., `C:\Program Files\...`) and gracefully falls back to directory enumeration when wildcard matching fails.
 - **Multi-line Merging**: Identifies cross-line JSON structures and restores them into single structured records.

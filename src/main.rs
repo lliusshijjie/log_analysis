@@ -20,6 +20,7 @@ mod web;
 use std::fs::File;
 use std::io::{stdout, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::mpsc as std_mpsc;
 
 use anyhow::{Context, Result};
@@ -168,6 +169,63 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+
+    // 7.1 Set console window title and icon (Windows only)
+    #[cfg(windows)]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn SetConsoleTitleW(lpConsoleTitle: *const u16) -> i32;
+        }
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetConsoleWindow() -> *mut std::ffi::c_void;
+            fn LoadImageW(hInst: *mut std::ffi::c_void, name: *const u16, type_: u32, cx: i32, cy: i32, fuLoad: u32) -> *mut std::ffi::c_void;
+            fn SetClassLongPtrW(hWnd: *mut std::ffi::c_void, nIndex: i32, dwNewLong: isize) -> isize;
+        }
+
+        // Set console window title
+        let title: Vec<u16> = OsStr::new("【☺】LogInsight")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        unsafe {
+            SetConsoleTitleW(title.as_ptr());
+        }
+
+        const IMAGE_ICON: u32 = 1;
+        const LR_SHARED: u32 = 0x0008;
+        const GCL_HICON: i32 = -14;
+        const GCL_HICONSM: i32 = -34;
+
+        let hwnd = unsafe { GetConsoleWindow() };
+        if !hwnd.is_null() {
+            // ID 1 is the icon we defined in resources.rc
+            let icon_name: Vec<u16> = OsStr::new("#1")
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let hicon = unsafe {
+                LoadImageW(
+                    ptr::null_mut(),
+                    icon_name.as_ptr(),
+                    IMAGE_ICON,
+                    0,
+                    0,
+                    LR_SHARED,
+                )
+            };
+            if !hicon.is_null() {
+                unsafe {
+                    SetClassLongPtrW(hwnd, GCL_HICON, hicon as isize);
+                    SetClassLongPtrW(hwnd, GCL_HICONSM, hicon as isize);
+                }
+            }
+        }
+    }
 
     // 8. Spawn web server
     rt.spawn(async move {
