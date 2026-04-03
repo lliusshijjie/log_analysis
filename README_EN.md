@@ -24,6 +24,7 @@ cargo run -- file1.log file2.log file3.log
 
 ## 3. Core Features
 - **Smart Encoding**: Automatically detects and converts GB18030 encoding (Chinese) and handles nested UTF-8 JSON string escaping.
+- **Enhanced Path Compatibility**: Supports Windows paths with spaces (e.g., `C:\Program Files\...`) and gracefully falls back to directory enumeration when wildcard matching fails.
 - **Multi-line Merging**: Identifies cross-line JSON structures and restores them into single structured records.
 - **Focus Mode**:
     - **Trigger**: Press `Alt+Enter` in search/list mode, or use `F6`.
@@ -49,6 +50,7 @@ cargo run -- file1.log file2.log file3.log
 - **Quick Jump**: Direct jump by line number or top/bottom navigation.
 - **Live Tailing**: `tail -f` like real-time monitoring. Automatically detects and incremental loads new lines.
 - **Noise Folding**: Merges continuous USB polling, thread cleaning, or duplicate logs to improve readability.
+- **Startup Warnings Popup**: When some files cannot be accessed due to permissions, a warning popup displays which files were skipped along with admin-run hints.
 - **File Solo Mode**:
     - **Trigger**: Press `Tab` to switch to file list focus, use `↑/↓` to select a file.
     - **Workflow**: Press `Enter` once to mark the file (`[●]` indicator), press `Enter` again to enter Solo mode.
@@ -169,4 +171,5 @@ Generates `log_config.toml` on first run:
 ## 7. Troubleshooting
 - **Garbage Characters**: Use `Windows Terminal` or set `chcp 65001`.
 - **Input Blocker**: **Do not** run in VS Code/Cursor integrated terminals; they intercept functional keys. Use a standalone terminal.
-- **Access Denied**: Close any running instances before recompiling.
+- **Access Denied**: If you see `拒绝访问 (os error 5)`, try running as administrator, or copy log files to a user-accessible directory. The startup warning popup will suggest solutions.
+- **Permission Issues**: When accessing `Program Files` directories fails, a warning popup appears with guidance. Run as administrator or copy logs to your user directory.

@@ -310,6 +310,8 @@ pub struct App {
     pub match_index_set: HashSet<usize>,
     pub current_match: usize,
     pub status_msg: Option<(String, Instant)>,
+    pub startup_warnings: Vec<String>,
+    pub show_startup_warnings: bool,
     pub clipboard: Option<Clipboard>,
     pub histogram: Vec<(String, u64)>,
     pub ai_state: AiState,
@@ -380,6 +382,7 @@ impl App {
         report_tx: mpsc::Sender<String>,
         report_rx: mpsc::Receiver<Result<String, String>>,
         page_size: usize,
+        startup_warnings: Vec<String>,
     ) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() {
@@ -390,6 +393,18 @@ impl App {
             file_list_state.select(Some(0));
         }
         let error_indices = Self::compute_error_indices(&entries);
+        let startup_warning_count = startup_warnings.len();
+        let initial_status = if startup_warning_count > 0 {
+            Some((
+                format!(
+                    "启动时有 {} 条文件访问警告 (Esc/Enter 可关闭详情弹窗)",
+                    startup_warning_count
+                ),
+                Instant::now(),
+            ))
+        } else {
+            None
+        };
         Self {
             all_entries: entries.clone(),
             filtered_indices: (0..entries.len()).collect(),
@@ -407,7 +422,9 @@ impl App {
             match_indices: Vec::new(),
             match_index_set: HashSet::new(),
             current_match: 0,
-            status_msg: None,
+            status_msg: initial_status,
+            startup_warnings,
+            show_startup_warnings: startup_warning_count > 0,
             clipboard: Clipboard::new().ok(),
             histogram,
             ai_state: AiState::Idle,

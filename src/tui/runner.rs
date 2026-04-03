@@ -14,7 +14,7 @@ use super::components::{
     render_adv_result_popup, render_ai_popup, render_ai_prompt_popup, render_detail_pane,
     render_export_popup, render_focus_list, render_help_popup, render_histogram,
     render_jump_popup, render_log_list_from_app, render_search_bar, render_sidebar,
-    render_thread_list,
+    render_startup_warnings_popup, render_thread_list,
 };
 use super::dashboard::{render_dashboard, render_header};
 use super::layout::{centered_rect_with_offset, create_focus_layout, create_layout};
@@ -352,6 +352,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_export_popup(frame, app);
     render_adv_result_popup(frame, app);
     render_search_modal(frame, app);
+    render_startup_warnings_popup(frame, app);
 }
 
 pub fn run_app(
@@ -510,6 +511,14 @@ pub fn run_app(
                     ExportState::Success(_) | ExportState::Error(_)
                 ) {
                     app.export_state = ExportState::Idle;
+                    continue;
+                }
+
+                if app.show_startup_warnings {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Enter => app.show_startup_warnings = false,
+                        _ => {}
+                    }
                     continue;
                 }
 

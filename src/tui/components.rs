@@ -1069,6 +1069,50 @@ Esc         关闭/取消          q          退出程序";
     frame.render_widget(popup, area);
 }
 
+pub fn render_startup_warnings_popup(frame: &mut Frame, app: &App) {
+    if !app.show_startup_warnings || app.startup_warnings.is_empty() {
+        return;
+    }
+
+    let area = centered_rect(88, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut warning_lines: Vec<String> = app
+        .startup_warnings
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(i, w)| format!("{}. {}", i + 1, w))
+        .collect();
+    if app.startup_warnings.len() > 8 {
+        warning_lines.push(format!(
+            "... 还有 {} 条未显示",
+            app.startup_warnings.len() - 8
+        ));
+    }
+    warning_lines.push(String::new());
+    warning_lines.push("按 Esc 或 Enter 关闭".to_string());
+
+    let content = format!(
+        "启动时存在部分文件访问问题，程序已跳过不可读文件并继续加载。\n\n{}",
+        warning_lines.join("\n")
+    );
+    let popup = Paragraph::new(content)
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" 启动警告 ")
+                .title_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .border_style(Style::default().fg(Color::Yellow)),
+        );
+    frame.render_widget(popup, area);
+}
+
 pub fn render_jump_popup(frame: &mut Frame, app: &App) {
     if app.input_mode != InputMode::JumpInput {
         return;
