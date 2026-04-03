@@ -27,16 +27,18 @@ cargo run -- file1.log file2.log file3.log
 - **Smart Encoding**: Automatically detects and converts GB18030 encoding (Chinese) and handles nested UTF-8 JSON string escaping.
 - **Enhanced Path Compatibility**: Supports Windows paths with spaces (e.g., `C:\Program Files\...`) and gracefully falls back to directory enumeration when wildcard matching fails.
 - **Multi-line Merging**: Identifies cross-line JSON structures and restores them into single structured records.
-- **Focus Mode**:
-    - **Trigger**: Press `Alt+Enter` in search/list mode, or use `F6`.
-    - **Function**: Creates an isolated view with only current matches; supports sub-searching (`/`).
-    - **Line Numbering**: Shows sequential 1-based numbering for easy multi-line reference.
-    - **Visual ID**: Cyan border and title displaying `🔍 FOCUS: query`.
-    - **Actions**:
-        - **Multi-line Copy (`c`)**: Supports ranges (`1-5`), lists (`1,3,5`), or mixed input. Use `*` / `a` / `all` to copy all lines at once.
-        - **Sub-search (`/`)**: Further filter results within focus view.
-        - **Export (`e`)**: Export focus view logs.
-        - **Exit**: Press `Esc` to return to normal view.
+- **Focus Mode** (Enhanced):
+    - **Search Highlighting**: When searching (`/`) within focus view, matches are highlighted in real-time.
+    - Original features preserved:
+        - **Trigger**: Press `Alt+Enter` in search/list mode, or use `F6`.
+        - **Function**: Creates an isolated view with only current matches; supports sub-searching (`/`).
+        - **Line Numbering**: Shows sequential 1-based numbering for easy multi-line reference.
+        - **Visual ID**: Cyan border and title displaying `🔍 FOCUS: query`.
+        - **Actions**:
+            - **Multi-line Copy (`c`)**: Supports ranges (`1-5`), lists (`1,3,5`), or mixed input. Use `*` / `a` / `all` to copy all lines at once.
+            - **Sub-search (`/`)**: Further filter results within focus view.
+            - **Export (`e`)**: Export focus view logs.
+            - **Exit**: Press `Esc` to return to normal view.
 - **Trace Filtering**:
     - **Trigger**: Press `Shift+T` to extract correlation ID (traceId/requestId/UUID) from selected log.
     - **Function**: Automatically filters logs containing the same correlation ID for complete request tracing.
@@ -49,7 +51,7 @@ cargo run -- file1.log file2.log file3.log
     - **Mutual Exclusion**: Horizontal scroll is disabled when word wrap is enabled.
 - **Original Line Numbers**: Displays line numbers (Ln) from the original file for easy cross-referencing.
 - **Quick Jump**: Direct jump by line number or top/bottom navigation.
-- **Live Tailing**: `tail -f` like real-time monitoring. Automatically detects and incremental loads new lines.
+- **Live Tailing** (Enhanced): `tail -f` like real-time monitoring. Automatically detects and incremental loads new lines. **Path Handling**: Improved file watcher to handle Windows path case-sensitivity and symbolic links.
 - **Noise Folding**: Merges continuous USB polling, thread cleaning, or duplicate logs to improve readability.
 - **Startup Warnings Popup**: When some files cannot be accessed due to permissions, a warning popup displays which files were skipped along with admin-run hints.
 - **File Solo Mode**:
@@ -57,12 +59,14 @@ cargo run -- file1.log file2.log file3.log
     - **Workflow**: Press `Enter` once to mark the file (`[●]` indicator), press `Enter` again to enter Solo mode.
     - **Solo Mode**: Only shows logs from the selected file, auto-switches focus to log list.
     - **Visual**: Selected file shows `[●]` indicator.
-- **Thread View**:
-    - **Trigger**: Press `t` in log list view.
-    - **Function**: Opens an isolated full-screen view containing all logs from the selected thread.
-    - **Actions**:
-        - `←` / `→` page navigation, `/` quick sub-search, `Shift+S` advanced search in thread view.
-        - `c` multi-line copy (supports `*` / `a` / `all` for copy-all), `e` export, `Esc` close.
+- **Thread View** (Enhanced):
+    - **Search Highlighting**: When searching (`/`) within thread view, matches are highlighted in real-time.
+    - Original features preserved:
+        - **Trigger**: Press `t` in log list view.
+        - **Function**: Opens an isolated full-screen view containing all logs from the selected thread.
+        - **Actions**:
+            - `←` / `→` page navigation, `/` quick sub-search, `Shift+S` advanced search in thread view.
+            - `c` multi-line copy (supports `*` / `a` / `all` for copy-all), `e` export, `Esc` close.
 - **Advanced Search**:
     - **Complex Filtering**: `Shift+S` opens a panel for time range, regex content, source file, and log level combinations.
     - **Relative Time**: Supports `-1h`, `-30m`, `-2d`, etc.
@@ -81,7 +85,7 @@ cargo run -- file1.log file2.log file3.log
     - **Error Pulse**: Sparkline for recent error frequency trends.
     - **Source Distribution**: Pie-chart style visualization for top 5 log sources.
     - **Trend Histogram**: Real-time minute/hour log volume and error trends.
-- **Error Mini-map**: Right sidebar indicates relative positions of Error logs for quick navigation.
+- **Error Mini-map**: Right sidebar indicates relative positions of Error logs for quick navigation. (Note: Focus mode uses simplified scrollbar style)
 - **AI Chat Interface (F3)**:
     - Dedicated view for multi-turn AI dialogue.
     - **Log Mounting**: Press `p` in log view to attach logs to AI context for deep analysis.
@@ -169,7 +173,11 @@ Generates `log_config.toml` on first run:
 - **ignore_patterns**: Regex to skip loading specific lines.
 - **theme**: Latency thresholds and colors.
 
-## 7. Troubleshooting
+## 8. User Guide
+
+For detailed usage instructions, see [docs/user-guide.md](docs/user-guide.md).
+
+## 9. Troubleshooting
 - **Garbage Characters**: Use `Windows Terminal` or set `chcp 65001`.
 - **Input Blocker**: **Do not** run in VS Code/Cursor integrated terminals; they intercept functional keys. Use a standalone terminal.
 - **Access Denied**: If you see `拒绝访问 (os error 5)`, try running as administrator, or copy log files to a user-accessible directory. The startup warning popup will suggest solutions.

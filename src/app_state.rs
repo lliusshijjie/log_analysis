@@ -43,6 +43,8 @@ pub struct FocusModeState {
     pub copy_input: String,
     /// History stack for browser-like back navigation
     pub history: Vec<FocusSnapshot>,
+    /// Search regex for text highlighting within focus mode
+    pub search_regex: Option<Regex>,
 }
 
 impl FocusModeState {
@@ -56,6 +58,7 @@ impl FocusModeState {
             focus_current_match: 0,
             copy_input: String::new(),
             history: Vec::new(),
+            search_regex: None,
         }
     }
 
@@ -68,6 +71,7 @@ impl FocusModeState {
         self.focus_current_match = 0;
         self.copy_input.clear();
         self.history.clear();
+        self.search_regex = None;
     }
 
     /// Push current state onto history stack before narrowing down
@@ -91,6 +95,7 @@ impl FocusModeState {
             }
             self.focus_match_indices = (0..self.focus_logs.len()).collect();
             self.focus_current_match = 0;
+            self.search_regex = None;
             true
         } else {
             false
@@ -113,6 +118,8 @@ pub struct ThreadViewState {
     pub zoom_level: u8,
     /// Copy input for line selection
     pub copy_input: String,
+    /// Search regex for text highlighting within thread view
+    pub search_regex: Option<Regex>,
 }
 
 impl ThreadViewState {
@@ -124,6 +131,7 @@ impl ThreadViewState {
             thread_id: String::new(),
             zoom_level: 1,
             copy_input: String::new(),
+            search_regex: None,
         }
     }
 
@@ -134,6 +142,7 @@ impl ThreadViewState {
         self.thread_id.clear();
         self.zoom_level = 1;
         self.copy_input.clear();
+        self.search_regex = None;
     }
 
     pub fn zoom_in(&mut self) {
@@ -1254,6 +1263,7 @@ impl App {
                 .cloned()
                 .collect();
             self.focus_mode.focus_logs = filtered;
+            self.focus_mode.search_regex = if negative { None } else { Some(re) };
         }
 
         // The new filtered set becomes the base for further sub-searches
@@ -1336,6 +1346,7 @@ impl App {
     pub fn thread_update_search(&mut self) {
         if self.search_query.is_empty() {
             self.thread_view.thread_logs = self.thread_view.original_thread_logs.clone();
+            self.thread_view.search_regex = None;
         } else {
             let negative = self.search_query.starts_with('!');
             let pattern = if negative { &self.search_query[1..] } else { &self.search_query };
@@ -1351,6 +1362,7 @@ impl App {
                     })
                     .cloned()
                     .collect();
+                self.thread_view.search_regex = if negative { None } else { Some(re) };
             }
         }
 

@@ -432,7 +432,6 @@ fn render_log_list_with_state<'a, F>(
     match_index_set: Option<&HashSet<usize>>,
     bookmarks: &BTreeSet<usize>,
     bookmark_index_set: Option<&HashSet<usize>>,
-    error_indices: &[usize],
     is_tailing: bool,
     visible_levels: &LevelVisibility,
     filter_tid: &Option<String>,
@@ -603,68 +602,7 @@ fn render_log_list_with_state<'a, F>(
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut list_state);
 
-    // Custom scrollbar with error markers (only in normal mode)
-    if !is_focus_mode {
-        render_error_scrollbar_with_state(frame, area, selected_global, total, error_indices);
-    } else {
-        render_focus_scrollbar(frame, area, selected_global, total);
-    }
-}
-
-/// Render error scrollbar with explicit state
-fn render_error_scrollbar_with_state(
-    frame: &mut Frame,
-    area: Rect,
-    selected: Option<usize>,
-    total: usize,
-    error_indices: &[usize],
-) {
-    if total == 0 || area.height < 4 {
-        return;
-    }
-
-    let track_height = area.height.saturating_sub(2) as usize;
-    let scrollbar_x = area.x + area.width - 1;
-    let track_start_y = area.y + 1;
-
-    let visible_rows = track_height;
-    let selected = selected.unwrap_or(0);
-
-    // Calculate thumb position and size based on visible window
-    let thumb_size = ((visible_rows * track_height) / total.max(1))
-        .max(1)
-        .min(track_height);
-    let max_scroll = total.saturating_sub(visible_rows);
-    let scroll_pos = selected.saturating_sub(visible_rows / 2).min(max_scroll);
-    let thumb_pos = if max_scroll == 0 {
-        0
-    } else {
-        (scroll_pos * (track_height - thumb_size)) / max_scroll
-    };
-
-    for y in 0..track_height {
-        let line_start = (y * total) / track_height;
-        let line_end = ((y + 1) * total) / track_height;
-
-        let has_error = error_indices
-            .iter()
-            .any(|&i| i >= line_start && i < line_end);
-        let is_thumb = y >= thumb_pos && y < thumb_pos + thumb_size;
-
-        let (ch, style) = if is_thumb && has_error {
-            ("█", Style::default().fg(Color::Red))
-        } else if is_thumb {
-            ("█", Style::default().fg(Color::Cyan))
-        } else if has_error {
-            ("█", Style::default().fg(Color::Red))
-        } else {
-            ("│", Style::default().fg(Color::DarkGray))
-        };
-
-        frame
-            .buffer_mut()
-            .set_string(scrollbar_x, track_start_y + y as u16, ch, style);
-    }
+    render_focus_scrollbar(frame, area, selected_global, total);
 }
 
 /// Render log list using app state (convenience wrapper for normal mode)
@@ -680,7 +618,6 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &App, area: Rect) {
         Some(&app.match_index_set),
         &app.bookmarks,
         Some(&app.bookmark_index_set),
-        &app.error_indices,
         app.is_tailing,
         &app.visible_levels,
         &app.filter_tid,
@@ -701,27 +638,25 @@ pub fn render_log_list_from_app(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_focus_list(frame: &mut Frame, app: &App, area: Rect) {
     let selected = app.focus_mode.focus_table_state.selected();
 
-    // Render the focus list (empty match_indices to hide yellow dots)
     render_log_list_with_state(
         frame,
         area,
         app.focus_mode.focus_logs.len(),
         |i| app.focus_mode.focus_logs.get(i),
         selected,
-        &[], // No match indices in focus mode - all entries are matches
+        &[],
         None,
         &app.bookmarks,
         Some(&app.bookmark_index_set),
-        &[], // No error indices in focus mode
-        false, // Not tailing
+        false,
         &app.visible_levels,
-        &None, // No filter_tid in focus mode
-        &None, // No filter_trace in focus mode
-        &None, // No search_regex in focus mode
-        Focus::LogList, // Always use log list focus in focus mode
-        false, // Not search mode
+        &None,
+        &None,
+        &app.focus_mode.search_regex,
+        Focus::LogList,
+        false,
         &app.files,
-        true, // Is focus mode
+        true,
         &app.focus_mode.focus_query,
         app.horizontal_scroll,
         app.wrap_lines,
@@ -781,6 +716,8 @@ pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
         (start + visible_rows).min(total)
     };
 
+    let thread_search_regex = app.thread_view.search_regex.as_ref();
+
     let items: Vec<ListItem> = (start..end)
         .map(|i| {
             let e = &entries[i];
@@ -790,8 +727,8 @@ pub fn render_thread_list(frame: &mut Frame, app: &App, area: Rect) {
             let idx = Some(i + 1);
             render_list_item(
                 e,
-                None, // No search regex in thread view initially
-                false, // Not a match
+                thread_search_regex,
+                false,
                 app.bookmark_index_set.contains(&i),
                 file_color,
                 idx,

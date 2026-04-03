@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Stdout;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -363,6 +364,12 @@ pub fn run_app(
     file_paths: &[PathBuf],
     re: &Regex,
 ) -> Result<()> {
+    let canonical_path_map: HashMap<PathBuf, usize> = file_paths
+        .iter()
+        .enumerate()
+        .filter_map(|(id, p)| std::fs::canonicalize(p).ok().map(|cp| (cp, id)))
+        .collect();
+
     loop {
         // State updates
         if let Ok(result) = app.ai_rx.try_recv() {
@@ -410,13 +417,17 @@ pub fn run_app(
             let mut appended = false;
             while let Ok(paths) = file_rx.try_recv() {
                 for changed_path in paths {
-                    if let Some((source_id, path)) = file_paths
+                    let source_id = file_paths
                         .iter()
-                        .enumerate()
-                        .find(|(_, p)| p.as_path() == changed_path.as_path())
-                    {
-                        let base_idx = app.all_entries.len();
-                        let new_entries = tail_state.read_new_lines(path, source_id, &re, base_idx);
+                        .position(|p| p.as_path() == changed_path.as_path())
+                        .or_else(|| {
+                            let cp = std::fs::canonicalize(&changed_path).ok()?;
+                            canonical_path_map.get(&cp).copied()
+                        });
+
+                    if let Some(source_id) = source_id {
+                        let path = &file_paths[source_id];
+                        let new_entries = tail_state.read_new_lines(path, source_id, re);
                         for entry in new_entries {
                             let display = DisplayEntry::Normal(entry);
                             app.all_entries.push(display);

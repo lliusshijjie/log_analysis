@@ -10,12 +10,14 @@ use crate::parser::{decode_line, merge_multiline_bytes, parse_line};
 
 pub struct TailState {
     offsets: HashMap<usize, u64>,
+    line_counts: HashMap<usize, usize>,
 }
 
 impl TailState {
     pub fn new() -> Self {
         Self {
             offsets: HashMap::new(),
+            line_counts: HashMap::new(),
         }
     }
 
@@ -23,12 +25,15 @@ impl TailState {
         self.offsets.insert(source_id, offset);
     }
 
+    pub fn init_line_count(&mut self, source_id: usize, count: usize) {
+        self.line_counts.insert(source_id, count);
+    }
+
     pub fn read_new_lines(
         &mut self,
         path: &PathBuf,
         source_id: usize,
         re: &Regex,
-        base_line_index: usize,
     ) -> Vec<LogEntry> {
         let Ok(mut file) = File::open(path) else {
             return vec![];
@@ -41,7 +46,7 @@ impl TailState {
 
         if file_size < offset {
             self.offsets.insert(source_id, 0);
-            return self.read_new_lines(path, source_id, re, base_line_index);
+            return self.read_new_lines(path, source_id, re);
         }
 
         if file_size == offset {
@@ -59,13 +64,16 @@ impl TailState {
 
         self.offsets.insert(source_id, file_size);
 
+        let base_line = self.line_counts.get(&source_id).copied().unwrap_or(0);
         let lines = merge_multiline_bytes(&buffer);
-        lines
+        let result: Vec<LogEntry> = lines
             .iter()
             .enumerate()
             .filter_map(|(i, b)| {
-                parse_line(&decode_line(b), b, re, source_id, base_line_index + i + 1)
+                parse_line(&decode_line(b), b, re, source_id, base_line + i + 1)
             })
-            .collect()
+            .collect();
+        self.line_counts.insert(source_id, base_line + lines.len());
+        result
     }
 }

@@ -114,7 +114,21 @@ fn main() -> Result<()> {
         }
     });
 
-    // 5. Initialize App state
+    // 5. Initialize tail state before App takes ownership of raw_entries
+    let mut tail_state = TailState::new();
+    for (id, path) in file_paths.iter().enumerate() {
+        if let Ok(meta) = std::fs::metadata(path) {
+            tail_state.init_offset(id, meta.len());
+        }
+        let max_line = raw_entries.iter()
+            .filter(|e| e.source_id == id)
+            .map(|e| e.line_index)
+            .max()
+            .unwrap_or(0);
+        tail_state.init_line_count(id, max_line);
+    }
+
+    // 6. Initialize App state
     let (export_tx, export_rx) = std::sync::mpsc::channel();
     let mut app = App::new(
         entries,
@@ -140,7 +154,7 @@ fn main() -> Result<()> {
     // Create shared state for web server
     let web_shared_state = web::state::WebSharedState::new(stats);
 
-    // 6. Setup file watcher for live tailing
+    // 7. Setup file watcher for live tailing
     let (file_tx, file_rx) = std_mpsc::channel();
     let watch_paths = file_paths.clone();
     let mut watcher = RecommendedWatcher::new(
@@ -155,14 +169,6 @@ fn main() -> Result<()> {
     )?;
     for path in &watch_paths {
         watcher.watch(path, RecursiveMode::NonRecursive)?;
-    }
-
-    // Initialize tail state with current file sizes
-    let mut tail_state = TailState::new();
-    for (id, path) in file_paths.iter().enumerate() {
-        if let Ok(meta) = std::fs::metadata(path) {
-            tail_state.init_offset(id, meta.len());
-        }
     }
 
     // 7. Setup terminal
