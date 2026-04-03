@@ -14,6 +14,8 @@ use crate::models::{
     AiState, ChatContext, ChatMessage, ChatRole, CurrentView, DashboardStats, DisplayEntry,
     ExportResult, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility, LogEntry,
 };
+use crate::analytics::compute_dashboard_stats;
+use crate::parser::build_histogram;
 use crate::report::{ReportCache, ReportPeriod};
 use crate::search::SearchCriteria;
 use crate::search_form::SearchFormState;
@@ -509,6 +511,22 @@ impl App {
             .collect()
     }
 
+    fn filtered_normal_logs_owned(&self) -> Vec<LogEntry> {
+        self.filtered_indices
+            .iter()
+            .filter_map(|&all_idx| match self.all_entries.get(all_idx) {
+                Some(DisplayEntry::Normal(log)) => Some(log.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn refresh_view_analytics(&mut self) {
+        let logs = self.filtered_normal_logs_owned();
+        self.histogram = build_histogram(&logs);
+        self.stats = compute_dashboard_stats(&logs);
+    }
+
     pub fn filtered_len(&self) -> usize {
         self.filtered_indices.len()
     }
@@ -695,11 +713,59 @@ impl App {
             .filter(|f| f.enabled)
             .map(|f| f.id)
             .collect();
+        let is_level_visible = |kind: crate::models::LogLevelKind, visible: &LevelVisibility| -> bool {
+            use crate::models::LogLevelKind;
+            match kind {
+                LogLevelKind::Info => visible.info,
+                LogLevelKind::Warn => visible.warn,
+                LogLevelKind::Error => visible.error,
+                LogLevelKind::Debug => visible.debug,
+                LogLevelKind::Other => true,
+            }
+        };
         let mut filtered_indices: Vec<usize> = self
             .all_entries
             .iter()
             .enumerate()
             .filter_map(|(idx, e)| {
+                if let DisplayEntry::Folded {
+                    start_index,
+                    end_index,
+                    ..
+                } = e
+                {
+                    if self.raw_entries.is_empty() {
+                        return None;
+                    }
+                    let start = *start_index;
+                    if start >= self.raw_entries.len() {
+                        return None;
+                    }
+                    let end = (*end_index).min(self.raw_entries.len() - 1);
+                    if start > end {
+                        return None;
+                    }
+                    // Folded rows don't carry exact per-entry metadata in DisplayEntry.
+                    // Keep only folds that contain at least one visible raw log from enabled files.
+                    let mut has_visible_member = false;
+                    for log in &self.raw_entries[start..=end] {
+                        if enabled_files.contains(&log.source_id)
+                            && is_level_visible(log.level_kind, &self.visible_levels)
+                        {
+                            has_visible_member = true;
+                            break;
+                        }
+                    }
+                    if !has_visible_member {
+                        return None;
+                    }
+                    // Thread/trace filtering requires exact fields; folded rows are ambiguous.
+                    if self.filter_tid.is_some() || self.filter_trace.is_some() {
+                        return None;
+                    }
+                    return Some(idx);
+                }
+
                 if let Some(sid) = e.get_source_id() {
                     if !enabled_files.contains(&sid) {
                         return None;
@@ -750,6 +816,7 @@ impl App {
         });
         self.update_search_matches();
         self.error_indices = self.compute_error_indices_from_indices();
+        self.refresh_view_analytics();
         self.needs_redraw = true;
     }
 
@@ -826,14 +893,16 @@ impl App {
                     }
                 }
             }
-        }
-        self.current_match = 0;
-        // Select the first match if there are any matches
-        if !self.match_indices.is_empty() {
-            self.list_state.select(Some(self.match_indices[0]));
-            self.status_msg = Some((format!("{} 个匹配", self.match_indices.len()), Instant::now()));
+            self.current_match = 0;
+            // Select the first match if there are any matches
+            if !self.match_indices.is_empty() {
+                self.list_state.select(Some(self.match_indices[0]));
+                self.status_msg = Some((format!("{} 个匹配", self.match_indices.len()), Instant::now()));
+            } else {
+                self.status_msg = Some(("No Result".into(), Instant::now()));
+            }
         } else {
-            self.status_msg = Some(("No Result".into(), Instant::now()));
+            self.current_match = 0;
         }
         self.needs_redraw = true;
     }
@@ -962,6 +1031,9 @@ impl App {
                 f.enabled = !f.enabled;
             }
             self.apply_filter();
+            if self.filtered_indices.is_empty() {
+                self.status_msg = Some(("当前筛选结果为空".into(), Instant::now()));
+            }
         }
     }
 
@@ -976,8 +1048,18 @@ impl App {
                     // Keep marked=true to show the dot indicator for solo file
                 }
                 self.apply_filter();
-                // Auto-switch focus to LogList after solo activation
-                self.focus = Focus::LogList;
+                // Auto-switch only when there is data to interact with.
+                if self.filtered_indices.is_empty() {
+                    self.focus = Focus::FileList;
+                    let name = self
+                        .files
+                        .get(idx)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_else(|| "当前文件".to_string());
+                    self.status_msg = Some((format!("{} 无可显示日志", name), Instant::now()));
+                } else {
+                    self.focus = Focus::LogList;
+                }
             } else {
                 // First Enter: mark the file with a dot
                 // Clear any other marked files first
@@ -989,6 +1071,62 @@ impl App {
                 }
             }
         }
+    }
+
+    pub fn open_selected_folded_popup(&mut self) -> bool {
+        let selected = match self.current_view {
+            CurrentView::Focus => self
+                .focus_mode
+                .focus_table_state
+                .selected()
+                .and_then(|i| self.focus_mode.focus_logs.get(i))
+                .cloned(),
+            CurrentView::Thread => self
+                .thread_view
+                .thread_table_state
+                .selected()
+                .and_then(|i| self.thread_view.thread_logs.get(i))
+                .cloned(),
+            _ => self.selected_entry().cloned(),
+        };
+
+        let Some(DisplayEntry::Folded {
+            start_index,
+            end_index,
+            count,
+            ..
+        }) = selected
+        else {
+            return false;
+        };
+
+        if self.raw_entries.is_empty() || start_index >= self.raw_entries.len() {
+            self.status_msg = Some(("折叠块对应原始日志不可用".into(), Instant::now()));
+            return false;
+        }
+
+        let end = end_index.min(self.raw_entries.len() - 1);
+        if start_index > end {
+            self.status_msg = Some(("折叠块范围无效".into(), Instant::now()));
+            return false;
+        }
+
+        let logs: Vec<DisplayEntry> = self.raw_entries[start_index..=end]
+            .iter()
+            .cloned()
+            .map(DisplayEntry::Normal)
+            .collect();
+
+        if logs.is_empty() {
+            self.status_msg = Some(("折叠块为空".into(), Instant::now()));
+            return false;
+        }
+
+        self.adv_result_popup
+            .open(logs, format!("折叠块展开 ({} 行)", count));
+        self.status_msg = Some(("已展开折叠日志".into(), Instant::now()));
+        self.needs_redraw = true;
+        true
     }
 
     #[allow(dead_code)]

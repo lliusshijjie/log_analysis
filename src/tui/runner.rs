@@ -429,33 +429,20 @@ pub fn run_app(
                         let path = &file_paths[source_id];
                         let new_entries = tail_state.read_new_lines(path, source_id, re);
                         for entry in new_entries {
+                            app.raw_entries.push(entry.clone());
                             let display = DisplayEntry::Normal(entry);
                             app.all_entries.push(display);
-                            app.filtered_indices.push(app.all_entries.len() - 1);
                             appended = true;
                         }
                     }
                 }
             }
-            let len = app.filtered_len();
-            if len > 0 {
-                app.list_state.select(Some(len - 1));
-            }
             if appended {
-                app.update_search_matches();
-                app.error_indices = app
-                    .filtered_indices
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(filtered_idx, &all_idx)| match app.all_entries.get(all_idx) {
-                        Some(DisplayEntry::Normal(log))
-                            if matches!(log.level_kind, crate::models::LogLevelKind::Error) =>
-                        {
-                            Some(filtered_idx)
-                        }
-                        _ => None,
-                    })
-                    .collect();
+                app.apply_filter();
+                let len = app.filtered_len();
+                if len > 0 {
+                    app.list_state.select(Some(len - 1));
+                }
                 app.needs_redraw = true;
             }
         }
@@ -1206,6 +1193,9 @@ pub fn run_app(
                                 // Quick search in focus mode
                                 app.start_search();
                             }
+                            KeyCode::Enter => {
+                                let _ = app.open_selected_folded_popup();
+                            }
                             _ => {}
                         }
                         continue;
@@ -1253,6 +1243,9 @@ pub fn run_app(
                             KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 // Open advanced search form in thread view
                                 app.search_form.open();
+                            }
+                            KeyCode::Enter => {
+                                let _ = app.open_selected_folded_popup();
                             }
                             _ => {}
                         }
@@ -1330,6 +1323,8 @@ pub fn run_app(
                                             .map(|r| r.as_str().to_string())
                                             .unwrap_or_else(|| app.search_query.clone());
                                         app.enter_focus_mode(if query.is_empty() { "全部".to_string() } else { query });
+                                    } else {
+                                        let _ = app.open_selected_folded_popup();
                                     }
                                 }
                                 KeyCode::Char('n') => app.next_match(),

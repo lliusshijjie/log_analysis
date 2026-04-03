@@ -1,210 +1,156 @@
-# LogInsight 日志分析器总结文档
+# LogInsight / 日志分析器
 
-## 1. 环境准备
-- **操作系统**: Windows 11 (推荐使用 Windows Terminal 以获得最佳显示效果)
-- **开发工具**: Rust 编译器 (rustc/cargo 1.75+)
-- **系统组件**: 需要访问系统剪贴板权限 (用于 `arboard` 库)
+> Rust TUI log analyzer with filtering, search, focus/thread views, live tailing, dashboard, and AI chat.
+>
+> 基于 Rust + ratatui 的终端日志分析器，支持过滤、搜索、专注/线程视图、实时追踪、统计仪表盘与 AI 对话分析。
 
-## 2. 编译与运行
-在项目根目录下使用 PowerShell 执行：
+## 中文说明
 
+### 1. 环境要求
+- Windows 10/11（推荐 Windows Terminal）
+- Rust 1.75+（`rustc` / `cargo`）
+- 需要本地终端剪贴板访问权限（`arboard`）
+
+### 2. 编译与运行
 ```powershell
-# 编译项目
+# 编译
 cargo build --release
 
-# 运行 (单文件)
+# 运行（单文件）
 cargo run -- "service.log"
 
-# 运行 (多文件 - 通配符)
+# 运行（多文件）
 cargo run -- logs/*.log
-
-# 运行 (多文件 - 显式列表)
-cargo run -- file1.log file2.log file3.log
+cargo run -- file1.log file2.log
 ```
 
-## 3. 核心功能特性
-- **自定义窗口标识**: 控制台窗口标题显示「【☺】LogInsight」，任务栏和窗口图标使用专用 LogInsight.ico，提升辨识度。
-- **智能转码**: 自动识别并转换 GB18030 编码（中文），并对日志内嵌的 UTF-8 JSON 字符串进行二次解码修复。
-- **智能转码**: 自动识别并转换 GB18030 编码（中文），并对日志内嵌的 UTF-8 JSON 字符串进行二次解码修复。
-- **增强路径兼容**: 支持带空格的 Windows 路径（如 `C:\Program Files\...`），并能智能处理通配符无法匹配的情况（自动回退到目录枚举）。
-- **多行合并**: 自动识别跨行打印的 JSON 结构，并将其还原为单条结构化记录。
-- **专注模式 (Focus Mode)** (已增强):
-    - **搜索高亮**: 在专注视图内进行搜索 (`/`) 时，匹配内容会实时高亮显示。
-    - 保留原有功能：
-    - **触发方式**: 在搜索模式下按 `Alt+Enter`，或在日志列表中按 `Alt+Enter` 进入，或直接按 `F6` 进入。
-    - **功能**: 创建一个只包含当前匹配项的独立视图，支持在专注列表内进行二次搜索 (`/`)。
-    - **行号增强**: 专注模式下显示从 `1` 开始的顺序行号，方便进行多行定位。
-    - **视觉标识**: 青色边框和标题显示 `🔍 FOCUS: 查询内容`。
-    - **操作**:
-        - **多行复制 (`c`)**: 弹窗支持输入行号范围（如 `1-5`）、列表（如 `1,3,5`）或混合模式；输入 `*` / `a` / `all` 可一键复制全部。
-        - **二次搜索 (`/`)**: 在当前专注结果中进一步筛选内容。
-        - **导出 (`e`)**: 导出当前专注视图的日志。
-        - **退出**: 按 `Esc` 返回正常视图。
-- **链路追踪 (Trace Filtering)**:
-    - **触发方式**: 按 `Shift+T` 从当前选中日志提取关联 ID（traceId/requestId/UUID等）。
-    - **功能**: 自动过滤并显示包含相同关联 ID 的所有日志，便于追踪完整请求链路。
-    - **视觉标识**: 标题栏显示洋红色 `[FILTER: Trace <ID>]`。
-    - **配置支持**: 可在 `log_config.toml` 中自定义关联 ID 的正则表达式模式。
-- **水平滚动与换行**:
-    - **水平滚动**: 按 `h` 向左滚动，按 `l` 向右滚动，查看超长日志行内容。
-    - **自动换行**: 按 `w` 切换自动换行模式，长行自动折行显示完整内容。
-    - **重置滚动**: 按 `Shift+H` 重置水平滚动到行首。
-    - **互斥关系**: 启用自动换行时，水平滚动自动禁用。
-- **原始行号**: 在列表最左侧展示原始日志文件中的行号（Ln），方便与原始文件对照。
-- **快速跳转**: 支持通过行号直接跳转，支持顶部/底部快速直达。
-- **实时追踪 (Live Tailing)** (已增强): 支持类似 `tail -f` 的实时监控功能。当日志文件追加内容时，程序会自动检测并增量加载新行。**路径处理改进**: 增强了文件监视器对 Windows 路径大小写和符号链接的处理能力。
-- **噪声折叠**: 自动识别并合并连续的 USB 轮询、线程清理及完全重复的日志行，大幅提升阅读效率。
-- **启动警告弹窗**: 当部分文件因权限问题无法访问时，程序会显示警告弹窗提示哪些文件跳过，并附带管理员运行提示。
-- **文件筛选 (Solo Mode)**:
-    - **触发方式**: `Tab` 切换到文件列表焦点后，用 `↑/↓` 选择文件。
-    - **操作流程**: 第一次按 `Enter` 标记文件（显示 `[●]` 标识），第二次按 `Enter` 进入 Solo 模式。
-    - **Solo 模式**: 只显示选中文件的日志，自动切换焦点到日志列表。
-    - **视觉标识**: 被选中的文件显示 `[●]` 标识。
-- **线程视图 (Thread View)** (已增强):
-    - **搜索高亮**: 在线程视图内进行搜索 (`/`) 时，匹配内容会实时高亮显示。
-    - 保留原有功能：
-        - **触发方式**: 在日志列表中按 `t` 键。
-        - **功能**: 打开一个全屏视图，显示当前选中行所在线程的全部日志行（**日志不折叠**）。
-        - **视觉标识**: 青色边框，标题显示 `Thread: <TID> (N 条) [Zoom: N]`。
-        - **右上角按钮**: `[+ Zoom | - Zoom | x Close]`
-        - **操作**:
-            - **翻页 (`←` / `→`)**: 上/下翻页。
-            - **搜索 (`/`)**: 在当前线程视图中二次筛选日志。
-            - **高级搜索 (`Shift+S`)**: 直接在当前线程视图打开高级搜索面板。
-            - **放大 (`+`) / 缩小 (`-`)**: 调整每行显示的高度密度。
-            - **导出 (`e`)**: 导出当前线程视图的日志到文件。
-            - **复制 (`c`)**: 支持行号范围复制；输入 `*` / `a` / `all` 可复制线程视图全部行。
-            - **退出 (`Esc` 或 `x`)**: 返回正常视图。
-- **高级搜索 (Advanced Search)**:
-    - **复合过滤**: `Shift+S` 打开面板，支持时间范围、内容正则、来源文件、多级别勾选组合过滤。
-    - **相对时间**: 时间字段支持 `-1h` (1小时前)、`-30m` (30分钟前)、`-2d` (2天前) 等自然语言输入。
-    - **即时提交与清空**: 面板内支持 `Ctrl+Enter` 直接搜索，`Ctrl+R` 一键清空输入条件。
-    - **输入校验**: 对无效时间、开始时间晚于结束时间、无效正则表达式给出明确错误提示。
-    - **条件常驻显示**: 日志标题栏常驻显示当前高级搜索条件 `[ADV: ...]`，并可用 `Ctrl+K` 一键清除。
-    - **结果浮窗**: 在日志主视图提交高级搜索后，匹配结果在独立浮窗中展示（行号从 `1` 开始），支持 `↑↓` 导航、`←→` 翻页、`/` 搜索、`c` 复制、`e` 导出、`Esc` 关闭；浮窗可通过 `Alt+方向键` 拖动，不遮挡主界面。
-- **可移动弹窗 (Movable Popups)**:
-    - **适用范围**: 高级搜索面板、高级搜索结果浮窗、模板保存/加载弹窗、专注/线程视图复制弹窗。
-    - **操作方式**: 弹窗打开时按 `Alt+←/→/↑/↓` 移动位置，按 `Ctrl+0` 复位到居中。
-- **性能分析**:
-    - **Delta Time**: 自动计算同线程相邻日志的时间差。
-    - **卡顿高亮**: 耗时 >100ms 显示黄色 `[+100ms]`，>1s 显示红色 `[SLOW]`。
-- **可视化统计 (Smart Dashboard)**:
-    - **系统健康度 (Health Gauge)**: 顶部绿色仪表盘实时显示系统健康评分 (0-100)，基于错误和警告密度自动计算。
-    - **错误脉冲 (Error Pulse)**: 顶部迷你图展示最近的错误发生频率，快速识别异常波动。
-    - **源分布图 (Source Distribution)**: 彩色饼状样式直观展示日志来源文件 Top 5 分布。
-    - **趋势直方图**: 底部直方图实时展示每分钟/每小时日志生成频率及错误趋势。
-        - **统计指标**: 顶部实时显示 `总计日志数` 和 `峰值点 (Peak)` 信息。
-        - **预警颜色**: 🟥红色 >500条 | 🟧橙色 >250条 | 🟦青色 正常。
-- **错误滚动条 (Mini-map)**: 右侧滚动条以红色标记显示 Error 日志的相对位置，快速定位问题区域。（注：专注模式下统一使用简化滚动条样式）
-- **多轮 AI 聊天 (AI Chat Interface)**:
-    - **F3 专用视图**: 提供完整的聊天界面，支持多轮对话。
-    - **上下文挂载**: 可以在日志视图中按 `p` 将特定日志"挂载"到聊天上下文中，AI 会针对这些日志进行深度分析。
-    - **实时反馈**: 聊天历史自动滚动，支持 AI 思考状态动画显示。
-    - **上下文面板**: 右侧实时展示已挂载的日志详情，支持自动换行显示完整内容。
-- **持久化管理 (History & Search Templates)**:
-    - **命令历史 (F4)**: 记录搜索、跳转、AI 分析历史，支持选中后按 `Enter` 一键重执行。
-    - **搜索模板**: 在高级搜索面板中通过 `Ctrl+S` 命名保存、`Ctrl+L` 快速加载常用组合。
-    - **持久化存储**: 数据自动保存至 `~/.loginsight/` 下的 `history.json` 和 `templates.json`。
-- **智能报告生成 (Smart Report Generator)**:
-    - **F5 专用视图**: 自动生成日报/周报，基于日志统计和 AI 分析。
-    - **周期选择**: 支持"今日"、"昨日"、"本周"三种报告周期。
-    - **一键生成**: 按 `Enter` 生成 Markdown 格式技术报告。
-    - **导出支持**: `Ctrl+C` 复制到剪贴板，`Ctrl+S` 保存为 .md 文件。
+### 3. 核心功能
+- **多文件日志解析**：支持普通路径和通配符，Windows 路径兼容增强。
+- **自动解码与容错**：优先 UTF-8，失败回退 GB18030，再回退 lossless-ish 显示策略。
+- **多行日志合并**：自动合并跨行 JSON/堆栈文本。
+- **过滤与搜索**：
+  - `/` 正则搜索（支持 `!term` 反向搜索）
+  - `Shift+S` 高级搜索（时间范围/级别/来源/内容正则）
+  - `Ctrl+K` 清除高级搜索条件
+- **专注模式（F6）**：仅展示结果集，可二次搜索并高亮匹配词。
+- **线程视图（t）**：按线程查看完整链路，支持二次搜索和高亮。
+- **折叠日志处理**：
+  - 自动折叠噪声/重复日志
+  - 选中折叠行后按 `Enter` 可展开查看该折叠块
+- **实时追踪（f）**：文件增长时自动增量读取并刷新视图。
+- **可视化统计**：顶部健康度 + 错误趋势 + 来源分布 + 底部直方图。
+- **AI 分析**：
+  - `a` 对当前上下文做诊断
+  - `F3` 进入聊天视图，支持挂载日志上下文（`p`）
 
-## 4. 交互操作快捷键
+### 4. 导出说明
+- `e`：导出当前可见日志为 CSV
+- `E`（Shift+E）：导出当前可见日志为 JSON
+- `r`：导出统计报告
+- `R`（Shift+R）：导出 AI 分析结果
 
-| 按键 | 类别 | 功能描述 |
-| :--- | :--- | :--- |
-| `↑` / `↓` | 导航 | 向上/向下选择 |
-| `←` / `→` | 导航 | 向上/向下翻页 (可配置 `page_size`) |
-| `k` / `j` | 导航 | (Vim 风格) 向上/向下选择 |
-| `g` / `G` | 导航 | 跳转到顶部 / 跳转到底部 |
-| `:` | 导航 | **跳转到指定行号** (输入行号后按 Enter) |
-| `h` / `l` | 滚动 | 水平向左/向右滚动日志内容 (20字符) |
-| `Shift+H` | 滚动 | 重置水平滚动到行首 |
-| `w` | 显示 | **切换自动换行模式** |
-| `Alt+Enter` | 专注模式 | **进入专注模式** (仅显示搜索结果，青色边框) |
-| `F1` | 视图 | **切换到日志列表视图** |
-| `F2` | 视图 | **切换到仪表盘视图** (显示统计、错误趋势、热点分析) |
-| `F3` | 视图 | **切换到 AI 聊天视图** (支持多轮对话和上下文分析) |
-| `F4` | 视图 | **切换到历史记录视图** (查看/重新执行历史命令) |
-| `F5` | 视图 | **切换到报告生成视图** (AI 生成日报/周报) |
-| `F6` | 视图 | **进入专注模式视图**（当前搜索结果独立展示） |
-| `←` / `→` | 图表 | (仪表盘视图) 滚动错误趋势图查看历史数据 |
-| `Tab` | 焦点 | 切换文件列表/日志列表焦点 |
-| `p` | 聊天 | (日志视图) **将选中日志挂载到 AI Chat 上下文** |
-| `i` | 聊天 | (Chat 视图) 进入消息输入模式 (Esc退出，Enter发送) |
-| `c` | 聊天 | (Chat 视图) 清空已挂载的日志上下文 |
-| `Shift+C` | 聊天 | (Chat 视图) 清空所有聊天历史 |
-| `Enter` | 历史 | (F4 视图) 重新执行选中的历史命令 |
-| `Delete` / `d` | 历史 | (F4 视图) 删除选中的历史记录 |
-| `c` | 历史 | (F4 视图) 清空所有历史记录 |
-| `Enter` | 报告 | (F5 视图) 生成 AI 报告 |
-| `Ctrl+C` | 报告 | (F5 视图) 复制报告到剪贴板 |
-| `Ctrl+S` | 报告 | (F5 视图) 保存报告为 .md 文件 |
-| `Space` | 文件 | (文件列表) 切换文件启用状态 |
-| `Tab` | 文件 | 切换到文件列表焦点 |
-| `Enter` | 文件 | (文件列表) **第一次按** 标记文件 `[●]` / **第二次按** 进入Solo模式并自动切换焦点到日志列表 |
-| `/` | 搜索 | 进入快捷正则表达式搜索 (Esc退出/清除高亮，Enter应用) |
-| `Shift+S` | 搜索 | **打开高级搜索面板** (支持时间范围、内容、正则、来源、级别组合) |
-| `Ctrl+S` | 模板 | (搜索面板内) **保存当前筛选条件为模板** |
-| `Ctrl+L` | 模板 | (搜索面板内) **从列表加载已保存的搜索模板** |
-| `Ctrl+Enter` | 搜索 | (高级搜索面板) 立即执行搜索 |
-| `Ctrl+R` | 搜索 | (高级搜索面板) 清空全部输入条件 |
-| `Ctrl+K` | 搜索 | (日志主视图) 清除当前高级搜索条件 `[ADV]` |
-| `Alt+←/→/↑/↓` | 弹窗 | 移动当前弹窗位置（加速步长） |
-| `Ctrl+0` | 弹窗 | 弹窗位置复位到居中 |
-| `!term` | 搜索 | 反向搜索，排除匹配项 |
-| `n` / `N` | 搜索 | 跳转到下一个/上一个搜索匹配项 (Enter后自动选中了第一个匹配项) |
-| `t` | 线程 | **打开/关闭线程视图** (显示当前选中行所在线程的全部日志) |
-| `←` / `→` | 线程视图 | 上/下翻页 |
-| `Shift+S` | 线程视图 | 打开线程视图内高级搜索面板 |
-| `+` / `-` | 线程视图 | 放大/缩小显示密度 |
-| `Shift+T` | 过滤 | **链路追踪** - 提取关联ID并过滤相关日志 |
-| `1/2/3/4` | 过滤 | 切换 Info/Warn/Error/Debug 级别显示 (标题栏显示 `[●I ●W ●E ●D]` 状态) |
-| `m` | 书签 | 切换当前行书签状态 (标记为紫色 🔖) |
-| `b` / `B` | 书签 | 跳转到下一个/上一个书签位置 |
-| `f` | 追踪 | **切换实时追踪模式** (开启后标题显示绿色 `[LIVE]`) |
-| `a` | AI诊断 | 调用 AI 分析当前选中的日志上下文 (需配合 Ollama) |
-| `c` / `y` | 导出 | 复制完整日志行 / 复制解析后的 JSON 内容（专注/线程复制弹窗支持 `*` / `a` / `all` 全选） |
-| `e` | 导出 | 导出当前过滤后的日志为 CSV 格式 |
-| `E` (Shift+E) | 导出 | 导出当前过滤后的日志为 JSON 格式 |
-| `r` | 导出 | 导出统计报告（错误汇总、性能指标） |
-| `R` (Shift+R) | 导出 | 导出 AI 分析结果（聊天历史） |
-| `?` | 帮助 | 显示快捷键帮助弹窗 |
-| `Esc` | 状态 | 关闭弹窗 / 清除过滤 / 取消输入 |
-| `q` | 系统 | 退出程序 |
+#### JSON 导出中的 `content` 规范化
+- 若日志 `content` 本身是合法 JSON（对象/数组/值），导出时会作为 JSON 值写入（结构化、格式化）。
+- 若 `content` 不是 JSON，则保持字符串原样导出。
 
-## 5. AI 诊断与聊天
-- **依赖**: 需要本地运行 [Ollama](https://ollama.ai/) 服务 (`ollama serve`)
-- **模型**: 默认使用 `qwen2.5-coder:7b` (建议 16GB 内存及以上使用)
-- **单行快速诊断**: 选中日志行后按 `a` 键，程序会提取该行前后上下文发送给 AI。
-- **多轮 Chat 模式**: 
-    1. 在 `F1` 视图选中关键日志按 `p` 键挂载。
-    2. 按 `F3` 进入聊天界面。
-    3. 按 `i` 输入问题（如：“这几条日志显示了什么异常？”），AI 将结合挂载的日志进行回答。
-    4. 聊天支持上下文记忆，可进行连续追问。
+### 5. 常用快捷键
+- `↑/↓` 或 `j/k`：上下移动
+- `←/→`：翻页
+- `g/G`：跳到顶部/底部
+- `:`：按行号跳转
+- `h/l`：水平滚动
+- `Shift+H`：重置水平滚动
+- `w`：切换自动换行
+- `Tab`：切换文件列表/日志列表焦点
+- `f`：切换 Live 模式
+- `m` / `b` / `B`：书签切换与导航
+- `?`：帮助
+- `q`：退出
 
-## 6. 配置系统
-程序首次运行时会在当前目录生成 `log_config.toml` 配置文件，支持自定义：
-- **log_pattern**: 日志解析正则表达式
-- **fold_rules**: 折叠规则（可配置匹配类型和模式）
-- **ignore_patterns**: 预解析过滤正则（匹配的日志行不会被加载）
-- **theme**: 慢日志阈值、语法高亮颜色和翻页行数 (`page_size`，默认20)
+### 6. 配置
+首次运行会在当前目录生成 `log_config.toml`，可配置：
+- 日志正则（`log_pattern`）
+- 折叠规则（`fold_rules`）
+- 忽略规则（`ignore_patterns`）
+- UI 参数（如 `page_size`）
 
-### 语法高亮
-日志内容会自动高亮显示：
-- **IP地址** (青色)
-- **URL链接** (蓝色)
-- **文件路径** (黄色)
+### 7. 开发验证
+```powershell
+cargo check
+cargo test
+```
 
-## 8. 使用指南
+---
 
-详细的使用说明请参阅 [docs/user-guide.md](docs/user-guide.md)。
+## English
 
-## 9. 常见问题排查
-- **乱码问题**: 若在终端看到乱码，请确保使用 `Windows Terminal` 或将代码页设为 UTF-8 (`chcp 65001`)。
-- **按键无效**: **禁止**在 Cursor 或 VS Code 的集成终端运行，集成终端会拦截大量功能键。请务必在独立终端中运行。
-- **文件占用**: 若编译报错 `拒绝访问 (os error 5)`，表示旧版本程序仍在运行，请先关闭正在运行的 TUI 实例。
-- **权限问题**: 若提示 `拒绝访问 (os error 5)`，可能需要以管理员身份运行程序，或将日志文件复制到当前用户可访问的目录。程序会在启动警告弹窗中提示可用的解决方案。
-- **跳转失败**: 跳转功能使用的是”原始行号”，如果日志经过过滤，跳转会定位到最接近该行号的可视日志。
+### 1. Requirements
+- Windows 10/11 (Windows Terminal recommended)
+- Rust 1.75+ (`rustc` / `cargo`)
+- Clipboard access for terminal session (`arboard`)
+
+### 2. Build and Run
+```powershell
+# Build
+cargo build --release
+
+# Run (single file)
+cargo run -- "service.log"
+
+# Run (multiple files)
+cargo run -- logs/*.log
+cargo run -- file1.log file2.log
+```
+
+### 3. Key Features
+- **Multi-file log ingestion** with wildcard and Windows path compatibility.
+- **Robust decoding**: UTF-8 first, then GB18030 fallback, then tolerant fallback text decoding.
+- **Multiline merge** for JSON/stack-like log blocks.
+- **Filter and search**:
+  - `/` regex search (supports negative search: `!term`)
+  - `Shift+S` advanced search (time/level/source/content regex)
+  - `Ctrl+K` clear advanced search criteria
+- **Focus mode (`F6`)** with in-view search and term highlighting.
+- **Thread view (`t`)** with thread-local filtering and highlighting.
+- **Folded logs**:
+  - Noise/identical lines can be folded
+  - Press `Enter` on a folded row to open expanded content
+- **Live tailing (`f`)** with incremental updates.
+- **Dashboard** with health, trend, source distribution, and histogram.
+- **AI diagnostics/chat**:
+  - `a` for quick diagnostics
+  - `F3` chat view with pinned context (`p`)
+
+### 4. Export
+- `e`: export visible logs to CSV
+- `E` (Shift+E): export visible logs to JSON
+- `r`: export statistics report
+- `R` (Shift+R): export AI analysis
+
+#### `content` normalization in JSON export
+- If a log `content` is valid JSON, it is exported as a structured JSON value.
+- Otherwise, `content` remains a plain string.
+
+### 5. Common Shortcuts
+- `↑/↓` or `j/k`: move selection
+- `←/→`: page up/down
+- `g/G`: jump to top/bottom
+- `:`: jump to line number
+- `h/l`: horizontal scroll
+- `Shift+H`: reset horizontal scroll
+- `w`: toggle wrap mode
+- `Tab`: switch focus (file list / log list)
+- `f`: toggle live mode
+- `m` / `b` / `B`: bookmark toggle/next/previous
+- `?`: help
+- `q`: quit
+
+### 6. Configuration
+On first run, `log_config.toml` is generated in the working directory.
+You can customize parsing pattern, fold rules, ignore rules, and UI settings (e.g. `page_size`).
+
+### 7. Dev Verification
+```powershell
+cargo check
+cargo test
+```

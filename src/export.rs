@@ -48,11 +48,22 @@ struct LogJson {
     pid: String,
     tid: String,
     level: String,
-    content: String,
+    content: serde_json::Value,
     source_file: String,
     line_number: u32,
     delta_ms: Option<i64>,
     json_payload: Option<serde_json::Value>,
+}
+
+fn normalize_content_json(content: &str) -> serde_json::Value {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return serde_json::Value::String(content.to_string());
+    }
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(v) => v,
+        Err(_) => serde_json::Value::String(content.to_string()),
+    }
 }
 
 pub fn export_logs_to_json(entries: &[DisplayEntry]) -> Result<String> {
@@ -68,7 +79,7 @@ pub fn export_logs_to_json(entries: &[DisplayEntry]) -> Result<String> {
                     pid: log.pid.clone(),
                     tid: log.tid.clone(),
                     level: log.level.clone(),
-                    content: log.content.clone(),
+                    content: normalize_content_json(&log.content),
                     source_file: log.source_file.clone(),
                     line_number: log.line_num,
                     delta_ms: log.delta_ms,
@@ -84,6 +95,25 @@ pub fn export_logs_to_json(entries: &[DisplayEntry]) -> Result<String> {
     file.write_all(json.as_bytes())?;
 
     Ok(filename)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_content_json;
+
+    #[test]
+    fn normalize_content_json_parses_valid_json_object() {
+        let v = normalize_content_json(r#"{"k":"v","n":1}"#);
+        assert!(v.is_object());
+        assert_eq!(v["k"], "v");
+    }
+
+    #[test]
+    fn normalize_content_json_keeps_plain_text_as_string() {
+        let raw = "not a json line";
+        let v = normalize_content_json(raw);
+        assert_eq!(v.as_str(), Some(raw));
+    }
 }
 
 #[derive(Serialize)]

@@ -107,8 +107,14 @@ pub fn build_histogram(entries: &[LogEntry]) -> Vec<(String, u64)> {
 }
 
 pub fn decode_line(bytes: &[u8]) -> String {
-    let (decoded, _, _) = GB18030.decode(bytes);
-    decoded.into_owned()
+    if let Ok(utf8) = std::str::from_utf8(bytes) {
+        return utf8.to_string();
+    }
+    let (decoded, _, had_errors) = GB18030.decode(bytes);
+    if !had_errors {
+        return decoded.into_owned();
+    }
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 pub fn create_log_regex(config: &ParserConfig) -> Result<Regex> {

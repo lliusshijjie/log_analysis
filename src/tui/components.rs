@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use unicode_width::UnicodeWidthChar;
 
 use crate::app_state::App;
-use crate::models::{AiState, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility};
+use crate::models::{AiState, CurrentView, DisplayEntry, ExportState, ExportType, FileInfo, Focus, InputMode, LevelVisibility};
 use crate::tui::layout::{centered_rect, centered_rect_with_offset};
 use crate::tui::syntax::highlight_content_default;
 
@@ -144,6 +144,66 @@ fn sanitize_for_tui_display(content: &str) -> String {
     out
 }
 
+fn wrap_spans_to_lines(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Line<'static>> {
+    if max_width == 0 {
+        return vec![Line::from(vec![])];
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current_line: Vec<Span<'static>> = Vec::new();
+    let mut current_width: usize = 0;
+
+    for span in spans {
+        let style = span.style;
+        let mut chunk = String::new();
+
+        for ch in span.content.chars() {
+            if ch == '\n' {
+                if !chunk.is_empty() {
+                    current_line.push(Span::styled(std::mem::take(&mut chunk), style));
+                }
+                lines.push(Line::from(std::mem::take(&mut current_line)));
+                current_width = 0;
+                continue;
+            }
+
+            let cw = ch.width().unwrap_or(0);
+            if current_width > 0 && current_width + cw > max_width {
+                if !chunk.is_empty() {
+                    current_line.push(Span::styled(std::mem::take(&mut chunk), style));
+                }
+                lines.push(Line::from(std::mem::take(&mut current_line)));
+                current_width = 0;
+            }
+
+            chunk.push(ch);
+            current_width += cw;
+
+            if current_width >= max_width {
+                if !chunk.is_empty() {
+                    current_line.push(Span::styled(std::mem::take(&mut chunk), style));
+                }
+                lines.push(Line::from(std::mem::take(&mut current_line)));
+                current_width = 0;
+            }
+        }
+
+        if !chunk.is_empty() {
+            current_line.push(Span::styled(chunk, style));
+        }
+    }
+
+    if !current_line.is_empty() || lines.is_empty() {
+        lines.push(Line::from(current_line));
+    }
+
+    // Fallback: avoid returning visually empty lines in edge cases.
+    if lines.iter().all(|l| l.spans.is_empty()) {
+        return vec![Line::from(vec![Span::raw(" ")])];
+    }
+    lines
+}
+
 fn render_list_item(
     entry: &DisplayEntry,
     search_regex: Option<&Regex>,
@@ -226,7 +286,12 @@ fn render_list_item(
             } else {
                 Style::default()
             };
-            ListItem::new(Line::from(spans)).style(style)
+            if wrap_lines {
+                let wrap_width = available_width.saturating_sub(2).max(8);
+                ListItem::new(wrap_spans_to_lines(spans, wrap_width)).style(style)
+            } else {
+                ListItem::new(Line::from(spans)).style(style)
+            }
         }
         DisplayEntry::Folded {
             count,
@@ -249,7 +314,12 @@ fn render_list_item(
             if !wrap_lines {
                 folded_spans = truncate_spans_to_width(folded_spans, available_width);
             }
-            ListItem::new(Line::from(folded_spans))
+            if wrap_lines {
+                let wrap_width = available_width.saturating_sub(2).max(8);
+                ListItem::new(wrap_spans_to_lines(folded_spans, wrap_width))
+            } else {
+                ListItem::new(Line::from(folded_spans))
+            }
         }
     }
 }
@@ -386,7 +456,7 @@ fn render_detail(entry: Option<&DisplayEntry>) -> Text<'static> {
             Line::from(format!("Count: {}", count)),
             Line::from(format!("Reason: {}", summary_text)),
         ]),
-        None => Text::from("No selection"),
+        None => Text::from("无选中日志"),
     }
 }
 
@@ -523,14 +593,12 @@ fn render_log_list_with_state<'a, F>(
         } else {
             Style::default()
         };
-        let help = if is_focus_mode {
-            "←/→=翻页  /=搜索  h/l=横向  w=换行  Esc=返回"
-        } else if search_mode {
+        let help = if search_mode {
             "ESC=exit  F6=Focus模式"
         } else if advanced_search_summary.is_some() {
-            "Tab=switch Space=toggle Enter=solo F6=Focus模式 Ctrl+K=清除高级搜索"
+            "Tab=切换焦点  F6=Focus模式  h/l=横向  w=换行  Ctrl+K=清除高级搜索"
         } else {
-            "Tab=switch Space=toggle Enter=solo F6=Focus模式 h/l=横向 w=换行"
+            "Tab=切换焦点  F6=Focus模式  h/l=横向  w=换行"
         };
         (title, title_style, list_style, help)
     };
@@ -555,32 +623,39 @@ fn render_log_list_with_state<'a, F>(
         (start + visible_rows).min(total)
     };
 
-    let items: Vec<ListItem> = (start..end)
-        .filter_map(|i| {
-            let e = entry_at(i)?;
-            let file_color = e.get_source_id()
-                .and_then(|sid| file_color_map.get(&sid).copied())
-                .unwrap_or(Color::White);
-            let idx = if is_focus_mode { Some(i + 1) } else { None };
-            let is_match = match_index_set
-                .map(|set| set.contains(&i))
-                .unwrap_or_else(|| match_indices.contains(&i));
-            let is_bookmarked = bookmark_index_set
-                .map(|set| set.contains(&i))
-                .unwrap_or_else(|| bookmarks.contains(&i));
-            Some(render_list_item(
-                e,
-                search_regex.as_ref(),
-                is_match,
-                is_bookmarked,
-                file_color,
-                idx,
-                horizontal_scroll,
-                wrap_lines,
-                available_item_width,
-            ))
-        })
-        .collect();
+    let items: Vec<ListItem> = if total == 0 {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "当前无日志可显示（Tab 切换到文件列表）",
+            Style::default().fg(Color::DarkGray),
+        )]))]
+    } else {
+        (start..end)
+            .filter_map(|i| {
+                let e = entry_at(i)?;
+                let file_color = e.get_source_id()
+                    .and_then(|sid| file_color_map.get(&sid).copied())
+                    .unwrap_or(Color::White);
+                let idx = if is_focus_mode { Some(i + 1) } else { None };
+                let is_match = match_index_set
+                    .map(|set| set.contains(&i))
+                    .unwrap_or_else(|| match_indices.contains(&i));
+                let is_bookmarked = bookmark_index_set
+                    .map(|set| set.contains(&i))
+                    .unwrap_or_else(|| bookmarks.contains(&i));
+                Some(render_list_item(
+                    e,
+                    search_regex.as_ref(),
+                    is_match,
+                    is_bookmarked,
+                    file_color,
+                    idx,
+                    horizontal_scroll,
+                    wrap_lines,
+                    available_item_width,
+                ))
+            })
+            .collect()
+    };
 
     let mut list_state = ListState::default();
     list_state.select(selected_global.map(|s| s.saturating_sub(start)));
@@ -817,7 +892,20 @@ pub fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn render_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
-    let detail = render_detail(app.selected_entry());
+    let selected = match app.current_view {
+        CurrentView::Focus => app
+            .focus_mode
+            .focus_table_state
+            .selected()
+            .and_then(|i| app.focus_mode.focus_logs.get(i)),
+        CurrentView::Thread => app
+            .thread_view
+            .thread_table_state
+            .selected()
+            .and_then(|i| app.thread_view.thread_logs.get(i)),
+        _ => app.selected_entry(),
+    };
+    let detail = render_detail(selected);
     let detail_title = app
         .status_message()
         .map(|m| format!(" {} ", m))
