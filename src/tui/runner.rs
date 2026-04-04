@@ -212,6 +212,50 @@ fn handle_horizontal_navigation(app: &mut App, key: KeyEvent) -> bool {
     }
 }
 
+fn handle_vertical_mouse_scroll(app: &mut App, kind: MouseEventKind) -> bool {
+    match kind {
+        MouseEventKind::ScrollUp => match app.current_view {
+            CurrentView::Focus => {
+                app.focus_previous();
+                true
+            }
+            CurrentView::Thread => {
+                app.thread_previous();
+                true
+            }
+            _ if app.adv_result_popup.is_open => {
+                app.adv_result_popup.previous();
+                true
+            }
+            CurrentView::Logs if app.focus == Focus::LogList => {
+                app.previous();
+                true
+            }
+            _ => false,
+        },
+        MouseEventKind::ScrollDown => match app.current_view {
+            CurrentView::Focus => {
+                app.focus_next();
+                true
+            }
+            CurrentView::Thread => {
+                app.thread_next();
+                true
+            }
+            _ if app.adv_result_popup.is_open => {
+                app.adv_result_popup.next();
+                true
+            }
+            CurrentView::Logs if app.focus == Focus::LogList => {
+                app.next();
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 fn apply_advanced_search(app: &mut App, criteria: &SearchCriteria) -> usize {
     match app.current_view {
         CurrentView::Focus => {
@@ -501,33 +545,43 @@ pub fn run_app(
                     if !supports_swipe {
                         continue;
                     }
-                    if app.wrap_lines {
-                        continue;
-                    }
                     match mouse_event.kind {
                         MouseEventKind::ScrollLeft => {
-                            app.scroll_horizontal_left(20);
-                            app.needs_redraw = true;
+                            if !app.wrap_lines {
+                                app.scroll_horizontal_left(20);
+                                app.needs_redraw = true;
+                            }
                         }
                         MouseEventKind::ScrollRight => {
-                            app.scroll_horizontal_right(20);
-                            app.needs_redraw = true;
+                            if !app.wrap_lines {
+                                app.scroll_horizontal_right(20);
+                                app.needs_redraw = true;
+                            }
                         }
                         MouseEventKind::ScrollUp
                             if mouse_event
                                 .modifiers
                                 .contains(KeyModifiers::SHIFT) =>
                         {
-                            app.scroll_horizontal_left(20);
-                            app.needs_redraw = true;
+                            if !app.wrap_lines {
+                                app.scroll_horizontal_left(20);
+                                app.needs_redraw = true;
+                            }
                         }
                         MouseEventKind::ScrollDown
                             if mouse_event
                                 .modifiers
                                 .contains(KeyModifiers::SHIFT) =>
                         {
-                            app.scroll_horizontal_right(20);
-                            app.needs_redraw = true;
+                            if !app.wrap_lines {
+                                app.scroll_horizontal_right(20);
+                                app.needs_redraw = true;
+                            }
+                        }
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                            if handle_vertical_mouse_scroll(app, mouse_event.kind) {
+                                app.needs_redraw = true;
+                            }
                         }
                         _ => {}
                     }

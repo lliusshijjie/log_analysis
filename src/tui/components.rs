@@ -1015,8 +1015,21 @@ pub fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         " Search (regex) "
     };
-    let search = Paragraph::new(format!("/{}", app.search_query))
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let search_text = if app.search_query.is_empty() {
+        Line::from(vec![
+            Span::styled("/", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                "Normal: keyword, Combined: keyword & keyword & ...",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("/", Style::default().fg(Color::Yellow)),
+            Span::raw(app.search_query.clone()),
+        ])
+    };
+    let search = Paragraph::new(search_text).block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(search, area);
 }
 
@@ -1667,7 +1680,11 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
     if popup.search_mode {
         let max_width = area.width.saturating_sub(2);
         if max_width >= 12 {
-            let desired_width = popup.search_query.chars().count() as u16 + 14;
+            let desired_width = if popup.search_query.is_empty() {
+                40
+            } else {
+                popup.search_query.chars().count() as u16 + 14
+            };
             let search_width = desired_width.max(20).min(max_width);
             let search_area = Rect::new(
                 area.x + area.width.saturating_sub(search_width + 1),
@@ -1676,7 +1693,20 @@ pub fn render_adv_result_popup(frame: &mut Frame, app: &mut App) {
                 3,
             );
             frame.render_widget(Clear, search_area);
-            let search_text = format!("/{}", popup.search_query);
+            let search_text = if popup.search_query.is_empty() {
+                Line::from(vec![
+                    Span::styled("/", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        "Normal: keyword, Combined: keyword & keyword & ...",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled("/", Style::default().fg(Color::Yellow)),
+                    Span::raw(popup.search_query.clone()),
+                ])
+            };
             let search_bar = Paragraph::new(search_text)
                 .style(Style::default().fg(Color::Yellow))
                 .block(

@@ -135,7 +135,7 @@ cargo run -- file1.log file2.log file3.log
 | `Tab` | File | Switch to file list focus |
 | `←` / `→` | File | (File list) Page navigation |
 | `Enter` | File | (File list) **First press** mark file `[●]` / **Second press** enter Solo mode and auto-switch focus to log list |
-| `/` | Search | Quick regex search; use `&` delimiter for AND terms (e.g., `is&error`) (Esc=clear highlights, Enter=apply) |
+| `/` | Search | Quick regex search; use `&` delimiter for AND terms (Placeholder: `Normal: keyword, Combined: keyword & keyword & ...`) (Esc=clear highlights, Enter=apply) |
 | `Shift+S` | Search | **Advanced Search Panel** |
 | `Ctrl+Enter` | Search | (Advanced Search) apply filter immediately |
 | `Ctrl+R` | Search | (Advanced Search) clear all form inputs |
